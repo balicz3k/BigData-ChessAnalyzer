@@ -1,0 +1,19 @@
+---
+description: Skrót zasad projektu partie-lichess (pełna wersja w AGENTS.md i docs/)
+alwaysApply: true
+---
+
+# Zasady projektu partie-lichess
+
+Pełne instrukcje: `AGENTS.md`, `docs/WYMAGANIA.md`, `docs/DANE-I-ANALIZY.md`, `docs/PLAN.md`.
+
+- Robisz tylko etap wskazany w wiadomości użytkownika. Po nim opisujesz, co powstało, jak sprawdzono i który prompt z `docs/PROMPTY.md` jest następny. Nie zaczynasz kolejnego etapu.
+- Miesiąc danych: wrzesień 2026. HDFS: `/user/chess/raw/lichess_2026-09.pgn`, próg 5 500 000 000 bajtów.
+- Trzy joby MapReduce i żadnych więcej: `ply_by_tc_elo`, `time_trouble_by_tc`, `accuracy_by_elo`. Definicje metryk tylko z `docs/DANE-I-ANALIZY.md`.
+- Brak silnika szachowego: ani Stockfisha, ani Leeli. Dokładność liczymy z gotowych `[%eval]`.
+- Brak Sparka, aplikacji webowej, modeli ML i odtwarzania szachownicy.
+- Sekrety (hasła, URI, certyfikaty prywatne) poza gitem. W repozytorium tylko `.env.example`.
+- Nie łączymy nazwisk FIDE z nickami Lichess. Nie commitujemy PGN, `.zst` ani `data/` poza `.gitkeep`.
+- Zapis idempotentny: HDFS nadpisywany, Mongo upsertem po kluczu unikalnym.
+- Python 3.11, zależności w `requirements.txt`. Najpierw test, potem kod (parser, wzory). Logika zegara i dokładności żyje w jednym miejscu (`src/`), mappery ją importują.
+- Komunikat błędu mówi, który próg nie został spełniony.

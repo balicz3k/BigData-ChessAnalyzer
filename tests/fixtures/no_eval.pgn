@@ -1,0 +1,14 @@
+[Event "Rated Classical game"]
+[Site "https://lichess.org/noeval01"]
+[White "gina"]
+[Black "hank"]
+[Result "1/2-1/2"]
+[UTCDate "2026.09.01"]
+[UTCTime "00:20:00"]
+[WhiteElo "1800"]
+[BlackElo "1810"]
+[TimeControl "900+10"]
+[Termination "Normal"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 1/2-1/2
+
