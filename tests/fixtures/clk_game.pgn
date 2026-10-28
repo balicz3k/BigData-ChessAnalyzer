@@ -1,0 +1,16 @@
+[Event "Rated Blitz game"]
+[Site "https://lichess.org/clk00001"]
+[White "alice"]
+[Black "bob"]
+[Result "0-1"]
+[UTCDate "2026.09.01"]
+[UTCTime "00:00:01"]
+[WhiteElo "1500"]
+[BlackElo "1700"]
+[WhiteRatingDiff "-5"]
+[BlackRatingDiff "+5"]
+[TimeControl "180+2"]
+[Termination "Time forfeit"]
+
+1. e4 { [%clk 0:03:00] } 1... e5 { [%clk 0:03:00] } 2. Nf3 { [%clk 0:02:50] } 2... Nc6 { [%clk 0:02:55] } 3. Bb5 { [%clk 0:02:30] } 3... a6 { [%clk 0:02:50] } 4. Ba4 { [%clk 0:01:00] } 4... Nf6 { [%clk 0:02:45] } 5. O-O { [%clk 0:00:08] } 5... Be7 { [%clk 0:02:40] } 0-1
+

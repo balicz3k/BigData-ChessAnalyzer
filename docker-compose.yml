@@ -1,0 +1,72 @@
+# Lokalny skład: MongoDB 7 (TLS + SCRAM) i jednowęzłowy Hadoop (HDFS + YARN).
+# Wersje obrazów: patrz README. Hasło Mongo pochodzi ze zmiennej środowiskowej
+# MONGO_ROOT_PASSWORD (np. z pliku .env, który nie wchodzi do gita).
+name: partie-lichess
+
+services:
+  mongo:
+    image: mongo:7.0.45
+    container_name: partie-mongo
+    restart: unless-stopped
+    command:
+      - mongod
+      - --auth
+      - --bind_ip_all
+      - --tlsMode
+      - requireTLS
+      - --tlsCertificateKeyFile
+      - /certs/server.pem
+      - --tlsCAFile
+      - /certs/ca.pem
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Ustaw MONGO_ROOT_PASSWORD w .env albo w środowisku}
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./certs:/certs:ro
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --tls
+        - --tlsCAFile
+        - /certs/ca.pem
+        - --host
+        - localhost
+        - --eval
+        - db.adminCommand('ping').ok
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  hadoop:
+    image: apache/hadoop:3.4.3
+    container_name: partie-hadoop
+    hostname: hadoop
+    restart: unless-stopped
+    command: ["bash", "/opt/hadoop-start.sh"]
+    env_file:
+      - ./docker/hadoop.env
+    ports:
+      - "127.0.0.1:9870:9870" # interfejs WWW NameNode
+      - "127.0.0.1:8088:8088" # interfejs WWW YARN
+    volumes:
+      - hadoop-data:/hadoop-data
+      - ./docker/hadoop-start.sh:/opt/hadoop-start.sh:ro
+      - ./src:/opt/projekt/src:ro
+      - ./mr:/opt/projekt/mr:ro
+      - ./data:/opt/projekt/data
+    healthcheck:
+      test: ["CMD-SHELL", "hdfs dfs -ls / > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 20s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  mongo-data:
+  hadoop-data:

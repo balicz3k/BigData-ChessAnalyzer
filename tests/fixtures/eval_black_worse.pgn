@@ -1,0 +1,16 @@
+[Event "Rated Blitz game"]
+[Site "https://lichess.org/eval0001"]
+[White "carol"]
+[Black "dave"]
+[Result "1-0"]
+[UTCDate "2026.09.01"]
+[UTCTime "00:05:00"]
+[WhiteElo "2100"]
+[BlackElo "1900"]
+[WhiteRatingDiff "+4"]
+[BlackRatingDiff "-4"]
+[TimeControl "300+0"]
+[Termination "Normal"]
+
+1. e4 { [%eval 0.20] [%clk 0:05:00] } 1... e5 { [%eval 0.10] [%clk 0:05:00] } 2. Nf3 { [%eval 0.30] [%clk 0:04:58] } 2... Nc6 { [%eval 0.20] [%clk 0:04:58] } 3. Bb5 { [%eval 0.40] [%clk 0:04:55] } 3... a6 { [%eval 0.30] [%clk 0:04:55] } 4. Ba4 { [%eval 0.35] [%clk 0:04:50] } 4... Nf6 { [%eval 0.25] [%clk 0:04:52] } 5. O-O { [%eval 0.40] [%clk 0:04:45] } 5... Be7 { [%eval 2.00] [%clk 0:04:50] } 6. Re1 { [%eval 2.10] [%clk 0:04:40] } 6... b5 { [%eval 1.90] [%clk 0:04:48] } 1-0
+

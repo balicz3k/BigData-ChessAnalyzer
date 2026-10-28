@@ -1,0 +1,22 @@
+docs/
+AGENTS.md
+
+# sekrety
+.env
+certs/*
+!certs/.gitkeep
+
+# dane (PGN i .zst nie wchodzą do gita; fixtury testowe są wyjątkiem)
+data/*
+!data/.gitkeep
+*.pgn
+!tests/fixtures/*.pgn
+*.zst
+
+# wyniki
+out/*.png
+
+# pythonowe śmieci
+__pycache__/
+.pytest_cache/
+.venv/

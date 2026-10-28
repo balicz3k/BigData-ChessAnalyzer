@@ -1,0 +1,16 @@
+[Event "Rated Bullet game"]
+[Site "https://lichess.org/mate0001"]
+[White "ivan"]
+[Black "judy"]
+[Result "0-1"]
+[UTCDate "2026.09.01"]
+[UTCTime "00:30:00"]
+[WhiteElo "2450"]
+[BlackElo "2500"]
+[WhiteRatingDiff "-3"]
+[BlackRatingDiff "+3"]
+[TimeControl "60+0"]
+[Termination "Normal"]
+
+1. e4 { [%eval 0.20] [%clk 0:01:00] } 1... e5 { [%eval 0.10] [%clk 0:01:00] } 2. Nf3 { [%eval 0.30] [%clk 0:00:59] } 2... Nc6 { [%eval 0.20] [%clk 0:00:59] } 3. Bc4 { [%eval 0.30] [%clk 0:00:57] } 3... Nf6 { [%eval 0.25] [%clk 0:00:58] } 4. Ng5 { [%eval 0.40] [%clk 0:00:55] } 4... d5 { [%eval 0.30] [%clk 0:00:57] } 5. exd5 { [%eval 0.35] [%clk 0:00:52] } 5... Nxd5 { [%eval 0.40] [%clk 0:00:55] } 6. Nxf7 { [%eval -1.50] [%clk 0:00:48] } 6... Kxf7 { [%eval -1.40] [%clk 0:00:54] } 7. Qf3+ { [%eval #-4] [%clk 0:00:40] } 7... Ke6 { [%eval #-3] [%clk 0:00:53] } 0-1
+
