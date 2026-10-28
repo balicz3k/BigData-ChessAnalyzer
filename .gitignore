@@ -1,5 +1,10 @@
 # sekrety
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.srl
 certs/*
 !certs/.gitkeep
 
@@ -17,3 +22,9 @@ out/*.png
 __pycache__/
 .pytest_cache/
 .venv/
+.coverage
+htmlcov/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
