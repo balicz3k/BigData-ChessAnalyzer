@@ -2,6 +2,8 @@
 
 Te definicje są obowiązujące. Implementacja ma je odwzorować, a nie zastąpić „podobną” statystyką.
 
+Wzory żyją tylko w `src/`. Mapper Hadoop importuje te funkcje i nie liczy ich drugi raz. Silnika szachowego nie uruchamiamy.
+
 ## Źródło główne
 
 - Katalog i licencja CC0: https://database.lichess.org/
@@ -10,7 +12,7 @@ Te definicje są obowiązujące. Implementacja ma je odwzorować, a nie zastąpi
 - Do projektu bierzemy wycinek. Tryb deweloperski kończy się na 50 MB nieskompresowanego PGN. Tryb pełny wymaga co najmniej 5 500 000 000 bajtów i ucina na granicy partii, nie w połowie nagłówka.
 - Ścieżka HDFS: `/user/chess/raw/lichess_2026-09.pgn`
 
-Od kwietnia 2017 partie mają zegar co do sekundy w komentarzu `[%clk]` przy półruchu. Około 6% partii standard ma ocenę Stockfisha `[%eval …]`, zawsze z perspektywy białych. Oceny mate (`#4`, `#-4`) pomijamy przy dokładności i liczymy osobno.
+Od kwietnia 2017 partie mają zegar co do sekundy w komentarzu `[%clk]` przy półruchu. Około 6% partii standard ma ocenę Stockfisha `[%eval …]`, zawsze z perspektywy białych. Oceny mate (`#4`, `#-4`) pomijamy tam, gdzie potrzebna jest liczba centypionów.
 
 Przykład zapisu:
 
@@ -23,8 +25,8 @@ Przykład zapisu:
 ## Źródło scrapowane
 
 - Indeks: https://ratings.fide.com/
-- Potwierdzone strony: https://ratings.fide.com/a_top.php?list=open oraz https://ratings.fide.com/a_top.php?list=men_blitz
-- Rapid i listy kobiet bierzemy z linków znalezionych na stronie głównej. Kodu listy nie zgadujemy, jeśli linku nie ma.
+- Listy bierzemy z linków na stronie głównej (`list=` w adresie). Kodu listy nie zgadujemy, jeśli linku nie ma.
+- Strona listy dociąga tabelę z adresu podanego w jej źródle (dziś `a_top.php?list=…`). Tego adresu też nie wymyślamy: musi wystąpić w pobranym HTML.
 - Między żądaniami jest przerwa. Zapisujemy nazwisko, federację, ranking, rok urodzenia, miejsce, nazwę listy, okres i adres strony.
 - To inne osoby niż nicki z Lichess. W sprawozdaniu nie ma łączenia tych zbiorów po nazwisku.
 
@@ -36,10 +38,11 @@ Partia odpada ze wszystkich jobów, gdy:
 - brakuje `WhiteElo` albo `BlackElo`, albo wartość nie jest liczbą całkowitą,
 - `TimeControl` jest puste albo równe `-`.
 
-Dodatkowo:
+Dodatkowo, osobno dla każdego jobu:
 
-- job zegara odrzuca partię bez ani jednego `[%clk]`,
-- job dokładności bierze tylko partię z co najmniej dziesięcioma ocenami liczbowymi `[%eval]` (mate się do tej dziesiątki nie wlicza).
+- `blunder_in_trouble` pomija ruch bez pary liczbowych `[%eval]` albo bez zegara gracza, który ten ruch wykonał. Partia bez żadnego takiego ruchu odpada z powodem `no_qualifying`.
+- `comeback_by_tc` bierze tylko partie rozstrzygnięte (`1-0` albo `0-1`) z co najmniej jedną liczbową oceną. Remis odpada z powodem `not_decisive`. Brak oceny liczbowej (sam mat się nie liczy) odpada z powodem `no_eval`.
+- `think_vs_cpl` odrzuca ruch o ujemnym czasie namysłu (licznik `negative_think`) i pomija ruch bez policzalnej straty. Partia bez żadnego policzonego ruchu odpada z powodem `no_qualifying`.
 
 Powód odrzucenia w MapReduce idzie licznikiem `reporter:counter` na stderr. Z logu jobu ma dać się przepisać tabelę do sprawozdania.
 
@@ -55,9 +58,11 @@ Szacowany czas partii, tak jak na Lichess: sekundy na zegarze plus 40 razy inkre
 | poniżej 1500 | `rapid` |
 | 1500 i więcej | `classical` |
 
+Bullet nie jest uśredniany z klasykiem. Tempo jest częścią klucza albo osobnym panelem wykresu.
+
 ## Kubełki Elo
 
-Dla długości partii kubełek liczymy ze średniej `WhiteElo` i `BlackElo`. Dla dokładności kubełek liczymy z Elo gracza, który wykonał ruch.
+Kubełek liczymy z Elo gracza, który wykonał ruch (`blunder_in_trouble`, `think_vs_cpl`). Job powrotu nie dzieli po Elo: klucz to samo tempo.
 
 | Elo | Klucz |
 |---|---|
@@ -67,70 +72,64 @@ Dla długości partii kubełek liczymy ze średniej `WhiteElo` i `BlackElo`. Dla
 | 2000–2399 | `2000` |
 | 2400 i więcej | `2400` |
 
-## Job `ply_by_tc_elo`
+## Job `blunder_in_trouble`
 
-Pytanie: czy krótsze tempo daje krótszą partię i czy zależy to od rankingu.
+Pytanie: czy zejście zegara do 10 sekund psuje jakość ruchu i czy słabiej notowani oraz bullet tracą więcej.
 
-Półruch to token SAN (`e4`, `Nf3`, `O-O`, `exd5`, `e8=Q+`). Nie liczymy numerów ruchów (`1.`, `1...`), komentarzy w klamrach ani wyniku na końcu.
+Ruch wchodzi, gdy jest para liczbowych `[%eval]` i zegar gracza przy tym ruchu. Para to ocena po poprzednim półruchu i ocena po tym ruchu, obie z pliku (perspektywa białych). Pierwszy półruch partii nie ma oceny przed sobą, więc odpada. Mat po którejkolwiek stronie pary pomija ruch. Brak `[%clk]` przy ruchu też go pomija.
 
-Klucz: `{tempo}|{kubełek średniego Elo}`.
+Przed stratą zamieniamy ocenę na perspektywę gracza, który wykonał ruch. Dla czarnych zmieniamy znak centypionów. Strata to `centipawn_loss`: `max(0, centypiony przed − centypiony po)`.
 
-Z mappera, jeden rekord na partię: `n=1` oraz `sum_plies`. Reducer sumuje. Średnia długość to `sum_plies / n`.
+Błąd to strata co najmniej 100 centypionów. Zegar 10 sekund i mniej to `trouble` (pod flagą). Zegar powyżej 10 sekund to `ok` (z czasem). Próg zegara i próg straty są niezależne: ruch przy 11 sekundach z dużą stratą jest błędem w kubełku `ok`, a nie ruchem pod flagą.
 
-## Job `time_trouble_by_tc`
+Klucz: `{tempo}|{kubełek Elo gracza}|{trouble albo ok}`.
 
-Pytanie: czy zejście zegara do 10 sekund wiąże się z porażką.
+Z mappera, jeden rekord na klucz w partii: `n_moves`, `n_blunders`. Reducer sumuje. Odsetek błędów to `n_blunders / n_moves`.
 
-Kolejność komentarzy `[%clk]` odpowiada kolejności półruchów: nieparzysty w kolejności gry to białe, parzysty to czarne. Format `H:MM:SS` albo `M:SS`. Gracz ma czasówkę, gdy którykolwiek jego zegar jest mniejszy lub równy 10 sekund.
+Wykres: odsetek błędów, słupek „pod flagą” obok „z czasem”. Każde tempo na osobnym panelu, więc bullet nie miesza się z klasykiem.
 
-Klucz: `{tempo}|{white albo black}`.
+## Job `comeback_by_tc`
 
-Jeden rekord na stronę w partii:
+Pytanie: w którym tempie częściej wygrywa się z pozycji gorszej o co najmniej 2 piony.
 
-- `n = 1`
-- `trouble` = 1 albo 0
-- `trouble_loss` = 1, gdy `trouble` = 1 i ta strona przegrała
-- `ok_loss` = 1, gdy `trouble` = 0 i ta strona przegrała
+Tylko partie rozstrzygnięte, które mają choć jedną liczbową ocenę. Oceny mate nie spełniają tego warunku.
 
-Remis nie jest porażką żadnej strony. W bullecie próg 10 sekund jest blisko całego budżetu czasu. W sprawozdaniu i na wykresie bullet nie jest zlepiany z klasykiem w jedną liczbę.
+Białe wracają, gdy wygrały (`1-0`) i kiedykolwiek w partii liczba centypionów z pliku jest `<= -200`. Czarne wracają, gdy wygrały (`0-1`) i kiedykolwiek ocena jest `>= 200`. Próg 200 centypionów to 2 piony. Ocena `-199` albo `199` nie jest powrotem. Nie odwracamy znaku: w pliku ocena jest z perspektywy białych, a warunek czarnych jest zapisany już po ich stronie (`>= 200` znaczy, że białe były do przodu o 2 piony).
 
-## Job `accuracy_by_elo`
+Klucz: tempo.
 
-Pytanie: czy wyżej notowani grają dokładniej względem oceny już zapisanej przy ruchu.
+Jeden rekord na partię: `n=1`, `comeback` równe 0 albo 1. Odsetek powrotów to `comeback / n`.
 
-Dotyczy tylko partii z co najmniej dziesięcioma liczbowymi `[%eval]`. Para ocen do ruchu to ocena sprzed ruchu i ocena po ruchu, obie z perspektywy białych w pliku. Jeśli któraś jest matem, ruch pomijamy.
+Wykres: odsetek powrotów według tempa, każde tempo osobno.
 
-Przed wzorem zamieniamy ocenę na perspektywę gracza, który wykonał ruch. Dla czarnych zmieniamy znak centypionów.
+W sprawozdaniu wprost: dotyczy około 6% partii, tych z gotowym `[%eval]`. To nie jest losowy wycinek wszystkich partii września.
 
-Szansa wygranej, wzór opisany na https://lichess.org/page/accuracy :
+## Job `think_vs_cpl`
 
-```text
-Win% = 50 + 50 * (2 / (1 + exp(-0.00368208 * centypiony)) - 1)
-```
+Pytanie: czy dodatkowe sekundy zmniejszają stratę centypionów i czy u wysokiego Elo krzywa się wypłaszcza.
 
-Dokładność ruchu:
+Czas namysłu liczymy z własnego zegara gracza i z inkrementu w `TimeControl`:
 
-```text
-gdy Win% po ruchu >= Win% przed ruchem: 100
-w przeciwnym razie:
-Dokładność% = 103.1668 * exp(-0.04354 * (Win% przed - Win% po)) - 3.1669
-```
+- pierwszy ruch gracza: czas początkowy (pierwsza liczba z `TimeControl`) minus zegar po ruchu,
+- każdy kolejny ruch gracza: poprzedni własny zegar minus zegar po ruchu, plus inkrement.
 
-Wynik obcinamy do przedziału 0–100. To uproszczenie względem kodu Lichess (tam jest jeszcze dopłata za niepewność analizy oraz średnia harmoniczna całej partii). W sprawozdaniu piszemy, że podajemy średnią dokładności ruchów, nie znaczek dokładności partii z serwisu.
+Inkrementu nie dodajemy przy pierwszym ruchu. Brak inkrementu to 0. Jeśli poprzedni własny półruch nie ma zegara, różnicy nie liczymy. Ujemny czas (zegar urósł bardziej niż inkrement) odrzucamy i zwiększamy licznik `negative_think`. Zero sekund zostaje.
 
-Strata centypionów ruchu, z perspektywy gracza: `max(0, centypiony przed - centypiony po)`.
+Koszyki czasu namysłu (sekundy, przedział z lewej domknięty):
 
-Klucz: kubełek Elo gracza, który wykonał ruch.
+| Czas namysłu `t` | Koszyk |
+|---|---|
+| `0 <= t < 2` | `0-2` |
+| `2 <= t < 10` | `2-10` |
+| `t >= 10` | `10+` |
 
-Jeden rekord na stronę, jeśli ta strona ma choć jeden policzony ruch:
+Strata centypionów jest ta sama co w `blunder_in_trouble` (znak czarnych odwrócony, mat i brak pary pomijają ruch). Ruch bez straty liczbowej nie wchodzi, nawet gdy czas namysłu jest znany.
 
-- `n_moves`
-- `sum_accuracy_millis` = suma dokładności ruchów pomnożona przez 1000 i zaokrąglona do całkowitej
-- `sum_cpl` = suma strat centypionów
+Klucz: `{tempo}|{kubełek Elo gracza}|{koszyk}`. Tempo zostaje w kluczu, żeby bullet nie został uśredniony z klasykiem.
 
-Średnia dokładność = `sum_accuracy_millis / n_moves / 1000`. Średnia strata = `sum_cpl / n_moves`.
+Z mappera, jeden rekord na klucz w partii: `n_moves`, `sum_cpl`. Reducer sumuje. Średnia strata to `sum_cpl / n_moves`.
 
-Podzbiór z oceną nie jest losowy. To partie, przy których ocena już była w dumpie.
+Wykres: średnia strata, linia na kubełek Elo, osobny panel na tempo.
 
 ## Format linii MapReduce
 
@@ -140,16 +139,28 @@ Mapper wypisuje tekst UTF-8:
 klucz\tliczba,liczba,...
 ```
 
-Kolejność liczb jest stała w danym jobie i opisana wyżej. Reducer rozdziela po przecinku, sumuje pola jako `int` i wypisuje ten sam układ. Klucze z polami pustymi nie występują.
+Kolejność liczb jest stała w danym jobie:
+
+| Job | Liczby |
+|---|---|
+| `blunder_in_trouble` | `n_moves,n_blunders` |
+| `comeback_by_tc` | `n,comeback` |
+| `think_vs_cpl` | `n_moves,sum_cpl` |
+
+Reducer rozdziela po przecinku, sumuje pola jako `int` i wypisuje ten sam układ. Klucze z polami pustymi nie występują.
 
 ## MongoDB
 
-Kolekcja `aggregates` w Atlasie. Unikalny indeks `(analysis, key)`. Upsert. Pola: `analysis`, `key`, liczniki jobu, `source_month` = `2026-09`, `updated_at`.
+Kolekcja `aggregates` w Atlasie. Unikalny indeks `(analysis, key)`. Upsert. Pola: `analysis` (`blunder_in_trouble`, `comeback_by_tc` albo `think_vs_cpl`), `key`, liczniki jobu, `source_month` = `2026-09`, `updated_at`. Agregaty nie trafiają do lokalnego Mongo. Puste `ATLAS_URI` kończy loader błędem, który nazywa brakujące `ATLAS_URI`, i nic nie zapisuje w innym miejscu.
 
-Kolekcja `fide_top` lokalnie. Unikalny indeks `(list, period, rank)`.
+Kolekcja `fide_top` lokalnie. Unikalny indeks `(list, period, rank)`. Drugi zapis tego samego wiersza nie zwiększa `count`.
 
 Kolekcja `import_runs` lokalnie. Jeden dokument na pipeline (`hdfs_pgn`, `fide_scrape`, `aggregates`). Przy ponownym imporcie dokument jest zastępowany. Trzyma adres źródła, liczbę bajtów, SHA-256 pliku PGN, ścieżkę HDFS i czas zakończenia.
 
 Gdy SHA-256 pliku lokalnego jest zgodny z ostatnim `import_runs` i rozmiar w HDFS jest ten sam, ponowny import pliku nic nie dopisuje.
 
 Połączenie lokalne: `tls=True` i plik CA. Bez `tlsAllowInvalidCertificates`. Atlas: URI `mongodb+srv`. Hasła tylko w `.env`, nigdy w kodzie.
+
+## Kod poprzednich jobów
+
+Funkcje `ply_job`, `clock_job` (`src/pgn.py`) i `accuracy_job` (`src/accuracy.py`) zostają w repozytorium, bo testy etapu 1 na nich stoją. Obowiązujące analizy MapReduce są trzy i są opisane wyżej. Ich wzory są w `src/analyses.py` i wołają wspólne `centipawn_loss`, tempo i kubełki, zamiast kopiować je do mapperów.
