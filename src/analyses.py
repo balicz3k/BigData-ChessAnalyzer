@@ -67,21 +67,16 @@ def _think_seconds(plies: list[Ply], index: int, initial: int, increment: int) -
     """Czas namysłu ruchu albo ``None``, gdy nie da się go policzyć (brak zegara).
 
     Pierwszy ruch gracza: czas początkowy minus zegar po ruchu, bez inkrementu.
-    Kolejny: różnica własnego zegara plus inkrement. Ujemny wynik też zwracamy,
-    żeby wołający mógł go odrzucić i policzyć.
+    Kolejny: różnica wobec bezpośrednio poprzedniego własnego zegara plus inkrement.
+    Luka (poprzedni własny półruch bez zegara) nie sięga do starszego odczytu.
+    Ujemny wynik też zwracamy, żeby wołający mógł go odrzucić i policzyć.
     """
-    side = index % 2
     clk = plies[index].clk
     if clk is None:
         return None
-    previous: int | None = None
-    seen_own = False
-    for earlier in range(side, index, 2):
-        seen_own = True
-        if plies[earlier].clk is not None:
-            previous = plies[earlier].clk
-    if not seen_own:
+    if index == index % 2:
         return initial - clk
+    previous = plies[index - 2].clk
     if previous is None:
         return None
     return (previous - clk) + increment
