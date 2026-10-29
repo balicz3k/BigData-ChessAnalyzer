@@ -18,6 +18,9 @@ services:
       - /certs/server.pem
       - --tlsCAFile
       - /certs/ca.pem
+      # Klient (mongosh, Python) weryfikuje certyfikat serwera plikiem CA.
+      # Nie wymagamy certyfikatu klienta: tlsCAFile bez tej flagi odrzuca takie połączenia.
+      - --tlsAllowConnectionsWithoutCertificates
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Ustaw MONGO_ROOT_PASSWORD w .env albo w środowisku}
