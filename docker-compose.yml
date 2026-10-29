@@ -50,6 +50,9 @@ services:
     image: apache/hadoop:3.4.3
     container_name: partie-hadoop
     hostname: hadoop
+    # Wolumen hadoop-data powstaje jako root. Startujemy jako root, skrypt oddaje katalog
+    # użytkownikowi hadoop i schodzi z uprawnień (patrz docker/hadoop-start.sh).
+    user: "0:0"
     restart: unless-stopped
     command: ["bash", "/opt/hadoop-start.sh"]
     env_file:
