@@ -144,6 +144,21 @@ def test_pierwszy_ruch_nie_dostaje_inkrementu(make_game):
     assert dict(result.records) == {"blitz|1200|0-2": (1, 0)}
 
 
+def test_luka_zegara_nie_siega_do_starszego_odczytu(make_game):
+    """Brak zegara na poprzednim własnym półruchu nie łączy dwóch odcinków w jeden namysł."""
+    plies = [
+        ("e4", 100, "0.20"),
+        ("e5", 100, "0.20"),
+        ("Nf3", None, "0.20"),
+        ("Nc6", 90, "0.20"),
+        ("Nc3", 90, "0.00"),
+    ]
+    result = think_job(make_game(plies, time_control="180+0"))
+    assert result.reject is None
+    assert result.counters.get("negative_think", 0) == 0
+    assert dict(result.records) == {"blitz|1200|10+": (2, 0)}
+
+
 def test_ujemny_czas_namyslu_jest_odrzucony(make_game):
     """Zegar urósł o 10 s przy inkrementie 2 s: namysł −8 s odpada i nie wchodzi do sumy straty."""
     plies = [
