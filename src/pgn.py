@@ -1,8 +1,9 @@
-"""Parser PGN z Lichess i wspólna logika jobów długości partii oraz zegara.
+"""Parser PGN z Lichess oraz wspólne czyszczenie, tempo i kubełki Elo.
 
-To jest jedyne miejsce, w którym żyje parsowanie zapisu partii, czyszczenie nagłówków,
-tempo, kubełki Elo oraz logika czasówki. Testy i mappery Hadoopa importują stąd.
-Definicje metryk: docs/DANE-I-ANALIZY.md.
+Parsowanie zapisu, czyszczenie nagłówków, tempo i kubełki Elo żyją tutaj.
+Obowiązujące trzy analizy (błąd przy fladze, powrót, czas namysłu) są w
+``src/analyses.py`` i importują stąd progi oraz parser. ``ply_job`` i ``clock_job``
+zostają, bo stoją na nich testy etapu 1. Definicje metryk: docs/DANE-I-ANALIZY.md.
 
 Kod celowo używa tylko biblioteki standardowej, bo mapper dostaje go przez ``-files``
 i działa na węźle bez naszego virtualenva.
