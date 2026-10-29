@@ -4,6 +4,14 @@
 # obrazu z docker/hadoop.env.
 set -euo pipefail
 
+# Obraz ma USER=hadoop, a nazwany wolumen Dockera jest własnością roota (755).
+# Compose ustawia user: "0:0", żeby dało się oddać katalog, a potem zejść do hadoop.
+if [ "$(id -u)" -eq 0 ]; then
+  chown hadoop:users /hadoop-data
+  export HOME=/opt/hadoop USER=hadoop LOGNAME=hadoop
+  exec /usr/sbin/runuser -u hadoop --preserve-environment -- /bin/bash "$0" "$@"
+fi
+
 NAME_DIR=/hadoop-data/name
 
 if [ ! -w /hadoop-data ]; then
@@ -29,5 +37,6 @@ hdfs dfs -mkdir -p /user/chess/raw
 echo "HDFS gotowy. /user/chess/raw istnieje."
 
 # Kontener ma żyć dopóki żyją demony; logi idą na stdout.
+# Obraz apache/hadoop zapisuje stdout demonów do plików *.out, nie *.log.
 LOG_DIR="${HADOOP_LOG_DIR:-${HADOOP_HOME:-/opt/hadoop}/logs}"
-exec tail -F "$LOG_DIR"/*.log
+exec tail -F "$LOG_DIR"/*.out
