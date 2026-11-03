@@ -4,3 +4,4 @@ beautifulsoup4
 matplotlib
 pytest
 zstandard
+python-dotenv
