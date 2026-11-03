@@ -106,7 +106,7 @@ def parse_players(html: str, list_code: str, source_url: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     rows: list[dict] = []
     for tr in soup.select("tr"):
-        rank_el = tr.select_one(".rank_span")
+        rank_el = tr.select_one("td:first-child")
         name_el = tr.select_one("a[href*='/profile/']")
         rating_el = tr.select_one(".rating_column")
         if rank_el is None or name_el is None or rating_el is None:
