@@ -18,6 +18,9 @@ services:
       - /certs/server.pem
       - --tlsCAFile
       - /certs/ca.pem
+      # Klient (mongosh, Python) weryfikuje certyfikat serwera plikiem CA.
+      # Nie wymagamy certyfikatu klienta: tlsCAFile bez tej flagi odrzuca takie połączenia.
+      - --tlsAllowConnectionsWithoutCertificates
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Ustaw MONGO_ROOT_PASSWORD w .env albo w środowisku}
@@ -47,6 +50,9 @@ services:
     image: apache/hadoop:3.4.3
     container_name: partie-hadoop
     hostname: hadoop
+    # Wolumen hadoop-data powstaje jako root. Startujemy jako root, skrypt oddaje katalog
+    # użytkownikowi hadoop i schodzi z uprawnień (patrz docker/hadoop-start.sh).
+    user: "0:0"
     restart: unless-stopped
     command: ["bash", "/opt/hadoop-start.sh"]
     env_file:

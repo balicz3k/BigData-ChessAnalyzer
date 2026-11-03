@@ -8,9 +8,9 @@ Trzy joby Hadoop MapReduce liczą statystyki z surowego PGN w HDFS: długość p
 
 | Etap | Stan |
 |---|---|
-| 0. Szkielet | gotowy. Docker nie był dostępny na maszynie, na której powstał, więc skład **nie był uruchomiony** (patrz niżej) |
+| 0. Szkielet | gotowy |
 | 1. Parser (`src/pgn.py`, `src/accuracy.py`) | gotowy, `pytest` zielony |
-| 2. Środowisko Docker/HDFS/Mongo TLS | **do zrobienia**: wymaga maszyny z Dockerem |
+| 2. Środowisko Docker/HDFS/Mongo TLS | gotowy. `hdfs dfs -ls /` w kontenerze i `scripts/check_mongo_tls.py` kończą się kodem 0 |
 | 3 i dalej | nie rozpoczęte |
 
 ## Wymagania
@@ -74,13 +74,15 @@ Hadoop działa jako jeden kontener z NameNode, DataNode, ResourceManager i NodeM
 
 ## Status uruchomienia składu
 
-**Docker nie był zainstalowany na maszynie, na której przygotowano etap 0, więc `docker compose up` nie został wykonany.** Sprawdzone bez Dockera:
+Skład został uruchomiony (Docker 29.1.3, Compose 2.40.3, 29.10.2026). `docker compose ps` pokazuje `partie-mongo` i `partie-hadoop` jako healthy.
 
-- `docker-compose.yml` jest poprawnym YAML-em i wskazuje obrazy z tabeli,
-- `scripts/gen_certs.sh` generuje CA i certyfikat serwera, łańcuch przechodzi `openssl verify`, a handshake TLS z `openssl s_server` działa w Pythonie z weryfikacją nazwy `localhost` i pliku CA. Bez naszego CA weryfikacja jest odrzucana,
-- `scripts/check_mongo_tls.py` poprawnie zgłasza błędy konfiguracji i brak połączenia.
+- `docker compose exec hadoop hdfs dfs -ls /` zwraca katalog `/user`. Start tworzy też `/user/chess/raw`.
+- `.venv/bin/python scripts/check_mongo_tls.py` kończy się kodem 0: TLS z weryfikacją pliku CA, użytkownik `admin` uwierzytelniony (SCRAM). Hasło bierze z `.env`.
 
-Niesprawdzone, do potwierdzenia w etapie 2 na maszynie z Dockerem: start `mongod` z `requireTLS` i inicjalizacją użytkownika, zachowanie `docker/hadoop-start.sh` w obrazie `apache/hadoop` (uprawnienia do wolumenu `/hadoop-data`, ścieżka logów, dostępność Pythona w kontenerze dla Hadoop Streaming) oraz `hdfs dfs -ls /`.
+Dwie poprawki względem szkicu z etapu 0, bez których kontenery nie przechodziły sprawdzenia:
+
+- Mongo z `--tlsCAFile` wymagało certyfikatu klienta i zrywało połączenie mongosh oraz Pythona. W `docker-compose.yml` jest `--tlsAllowConnectionsWithoutCertificates`. Klient nadal weryfikuje certyfikat serwera plikiem CA.
+- Wolumen `hadoop-data` należy do roota, obraz ma `USER=hadoop`. Kontener startuje jako root, `docker/hadoop-start.sh` oddaje `/hadoop-data` użytkownikowi `hadoop` i schodzi z uprawnień przez `runuser`. Demony piszą do `/var/log/hadoop/*.out`, a skrypt wypisuje je na stdout. W obrazie jest Python 3.10 (`/usr/bin/python3`).
 
 ## Skill `python-testing`
 
