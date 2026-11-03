@@ -8,8 +8,10 @@ from pathlib import Path
 
 
 def _bootstrap() -> None:
+    import os
+    cwd = Path(os.getcwd())
     here = Path(__file__).resolve().parent
-    for candidate in (here, here.parent):
+    for candidate in (cwd, here, here.parent):
         if (candidate / "src" / "analyses.py").is_file():
             entry = str(candidate)
             if entry not in sys.path:
