@@ -94,7 +94,7 @@ Plan przewiduje `npx skills add https://github.com/paldom/python-skills --skill 
 src/pgn.py        parser PGN, czyszczenie, tempo, kubełki Elo, joby długości i zegara (dla jednej partii)
 src/accuracy.py   wzory dokładności i job dokładności (dla jednej partii)
 tests/            testy i fixtury PGN (tests/fixtures)
-mr/               mappery i reducer Hadoop Streaming (etap 5)
+mr/               mapper_blunder.py, mapper_comeback.py, mapper_think.py, reducer.py — Hadoop Streaming (etap 5)
 scripts/          gen_certs.sh, check_mongo_tls.py
 docker/           konfiguracja i start Hadoopa
 data/ out/ certs/ poza gitem (tylko .gitkeep)

@@ -237,7 +237,7 @@ def player_elos(headers: Mapping[str, str]) -> tuple[int, int]:
     return int(headers["WhiteElo"]), int(headers["BlackElo"])
 
 
-# --- job ply_by_tc_elo -------------------------------------------------------------------
+# --- job ply_by_tc_elo (zachowany na potrzeby testów etapu 1) -------------------------
 
 
 def ply_job(game: RawGame) -> JobResult:
