@@ -2,7 +2,7 @@
 
 **Tempo, zegar i dokładność partii szachowych na podstawie bazy Lichess** (wrzesień 2026, licencja CC0).
 
-Trzy joby Hadoop MapReduce liczą statystyki z surowego PGN w HDFS: długość partii wg tempa i rankingu, czasówkę wg tempa oraz dokładność wg rankingu (z gotowych `[%eval]`, bez silnika szachowego). Lokalne MongoDB trzyma ranking FIDE i metadane importu, Atlas trzyma agregaty. Definicje metryk: `docs/DANE-I-ANALIZY.md`, plan: `docs/PLAN.md`.
+Trzy joby Hadoop MapReduce liczą statystyki z surowego PGN w HDFS: `blunder_in_trouble` (błąd przy fladze wg tempa), `comeback_by_tc` (powrót po stratnej pozycji wg tempa), `think_vs_cpl` (czas namysłu a utrata centypionów, z `[%eval]`, bez silnika). Lokalne MongoDB trzyma ranking FIDE i metadane importu, Atlas trzyma agregaty. Definicje metryk: `docs/DANE-I-ANALIZY.md`, plan: `docs/PLAN.md`.
 
 ## Stan realizacji
 
@@ -17,7 +17,6 @@ Trzy joby Hadoop MapReduce liczą statystyki z surowego PGN w HDFS: długość p
 
 - Linux albo WSL2, Docker z wtyczką Compose, `openssl`, około 16 GB RAM (pełny wycinek około 15 GB dysku).
 - Python 3.11 (docelowo). Kod i testy sprawdzono na Pythonie 3.14.4, składnię sprawdzono pod 3.11 (`ast`, `feature_version=(3, 11)`), ale testów pod 3.11 nie uruchamiano.
-- Node.js (`npx`) tylko do instalacji skilla Cursora (patrz niżej).
 
 ## Szybki start
 
@@ -84,14 +83,10 @@ Dwie poprawki względem szkicu z etapu 0, bez których kontenery nie przechodzi�
 - Mongo z `--tlsCAFile` wymagało certyfikatu klienta i zrywało połączenie mongosh oraz Pythona. W `docker-compose.yml` jest `--tlsAllowConnectionsWithoutCertificates`. Klient nadal weryfikuje certyfikat serwera plikiem CA.
 - Wolumen `hadoop-data` należy do roota, obraz ma `USER=hadoop`. Kontener startuje jako root, `docker/hadoop-start.sh` oddaje `/hadoop-data` użytkownikowi `hadoop` i schodzi z uprawnień przez `runuser`. Demony piszą do `/var/log/hadoop/*.out`, a skrypt wypisuje je na stdout. W obrazie jest Python 3.10 (`/usr/bin/python3`).
 
-## Skill `python-testing`
-
-Plan przewiduje `npx skills add https://github.com/paldom/python-skills --skill python-testing`. Na maszynie nie było Node.js, więc pliki skilla (`SKILL.md`, skrypt audytu i trzy pliki referencyjne) pobrano ręcznie z gałęzi `main` tego samego repozytorium do `.agents/skills/python-testing/`. Zawartość jest taka sama jak po instalacji przez `npx`, ale instalator nie zostawił swoich metadanych. Po instalacji Node.js można uruchomić polecenie z planu, żeby odtworzyć je oficjalnie.
-
 ## Struktura
 
 ```text
-src/pgn.py        parser PGN, czyszczenie, tempo, kubełki Elo, joby długości i zegara (dla jednej partii)
+src/pgn.py        parser PGN, czyszczenie, tempo, kubełki Elo; ply_job/clock_job zachowane dla testów
 src/accuracy.py   wzory dokładności i job dokładności (dla jednej partii)
 tests/            testy i fixtury PGN (tests/fixtures)
 mr/               mapper_blunder.py, mapper_comeback.py, mapper_think.py, reducer.py — Hadoop Streaming (etap 5)
