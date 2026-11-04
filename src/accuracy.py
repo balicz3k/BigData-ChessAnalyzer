@@ -31,7 +31,7 @@ _EXP_LIMIT = 700.0
 
 
 def win_percent(centipawns: float) -> float:
-    """Szansa wygranej (0-100) gracza, z którego perspektywy podano ocenę."""
+    """Szansa wygrania w procentach dla danej oceny centypionowej."""
     exponent = -_WIN_COEFFICIENT * centipawns
     if exponent > _EXP_LIMIT:
         return 0.0
@@ -54,14 +54,10 @@ def centipawn_loss(cp_before: int, cp_after: int) -> int:
 
 
 def accuracy_job(game: RawGame) -> JobResult:
-    """Jeden rekord na stronę z co najmniej jednym policzonym ruchem.
+    """Job dokładności — dwa rekordy na partię (białe i czarne).
 
-    Klucz: kubełek Elo gracza, który wykonał ruch. Liczby: ``(n_moves, sum_accuracy_millis,
-    sum_cpl)``. Rekordy idą w kolejności białe, czarne.
-
-    Para ocen to ocena po poprzednim półruchu i po tym ruchu, więc pierwszy ruch partii
-    (bez oceny przed nim) jest pominięty. Pary z matem są pomijane i liczone w liczniku
-    ``mate_pairs``. Brak ``[%eval]`` przy którymkolwiek końcu pary też pomija ruch.
+    Klucz: kubełek Elo, liczby: (n_moves, sum_accuracy_millis, sum_cpl).
+    Pierwszy ruch partii i ruchy z matem są pomijane.
     """
     reason = header_reject_reason(game.headers)
     if reason:

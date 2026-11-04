@@ -7,6 +7,10 @@ import sys
 from pathlib import Path
 
 
+# Hadoop Streaming uruchamia każdy worker osobno przez -files, więc nie ma
+# wspólnego virtualenva. _bootstrap() kopiujemy do każdego mappera/reducera
+# zamiast importować ze shared modułu — bo przy -files inne pliki .py mogą
+# nie trafić na sys.path. To ograniczenie środowiska, nie błąd projektu.
 def _bootstrap() -> None:
     import os
     cwd = Path(os.getcwd())
