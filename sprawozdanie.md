@@ -24,7 +24,7 @@ Do przetwarzania wykorzystano paradygmat MapReduce uruchomiony na klastrze Hadoo
 
 - **Źródło:** Lichess.org – otwarte bazy partii szachowych (licencja CC0)
 - **Zakres:** wrzesień 2026
-- **Rozmiar:** ~5,5 GB (plik PGN skompresowany zstandard, pełny wycinek ~15 GB)
+- **Rozmiar:** ~5,5 GB nieskompresowanego PGN (`data/lichess_2026-09.pgn`, 5 500 001 981 B). Archiwum Lichess jest w formacie `.zst`; `src/download.py` rozpakowuje strumień i przerywa po pierwszej kompletnej partii za progiem 5,5 GB, więc to początek miesiąca, a nie cały miesiąc ani losowa próba
 - **Format:** PGN (Portable Game Notation)
 
 Każda partia w pliku PGN zawiera:
@@ -34,14 +34,14 @@ Każda partia w pliku PGN zawiera:
 
 **Klasyfikacja tempa** opiera się na wartości `TimeControl` z nagłówka PGN: ultrabullet, bullet, blitz, rapid, classical. **Kubełki ELO:** poniżej 1200, 1200–1599, 1600–1999, 2000–2399, 2400+.
 
-Oprócz danych Lichess projekt scrapuje ranking FIDE (top 100 graczy z list rankingowych) za pomocą biblioteki Beautiful Soup. Dane te trafiają do lokalnej kolekcji `fide_top` w MongoDB.
+Oprócz danych Lichess projekt scrapuje ranking FIDE (wiersze tabel list rankingowych; kod nie ogranicza liczby graczy do 100) za pomocą biblioteki Beautiful Soup. Dane te trafiają do lokalnej kolekcji `fide_top` w MongoDB.
 
 ---
 
 ## 3. Architektura systemu
 
 ```
-  Lichess PGN (.zst)
+  Lichess PGN (.zst, rozpakowany strumieniowo)
          |
          v
    HDFS /user/chess/raw/          <- Hadoop 3.4.3 (kontener Docker)
@@ -73,7 +73,8 @@ Oprócz danych Lichess projekt scrapuje ranking FIDE (top 100 graczy z list rank
 | Baza chmurowa | MongoDB Atlas | klaster M0 |
 | Scraping FIDE | Python + Beautiful Soup | — |
 | Wizualizacje | matplotlib | — |
-| Środowisko wykonawcze | Python | 3.14.4 |
+| Środowisko deweloperskie i testy | Python | 3.14.4 |
+| Mappery i reducer w kontenerze Hadoop | Python | 3.10 |
 
 Hadoop działa jako pojedynczy kontener z NameNode, DataNode, ResourceManager i NodeManager (`docker/hadoop-start.sh`). Połączenie z lokalnym MongoDB zabezpieczone jest TLS z własnym CA (certyfikaty generowane skryptem `scripts/gen_certs.sh`).
 
@@ -99,9 +100,9 @@ Skrypt `mr/run_jobs.sh` uruchamia trzy joby sekwencyjnie. Kluczowe parametry Had
 **Klucz MapReduce:** `tempo|elo_bucket|trouble` lub `tempo|elo_bucket|ok`
 **Wartości:** `(n_moves, n_blunders)` – liczba ruchów z dostępną oceną i zegarem, liczba tych, które były blunderami.
 
-Ruch wchodzi do analizy tylko gdy dostępna jest para liczbowych ocen (przed i po ruchu) oraz wartość zegara. Ruchy po zugzwangu i ruchy matujące są pomijane (brak pary ocen liczbowych).
+Ruch wchodzi do analizy tylko gdy dostępna jest para liczbowych ocen (przed i po ruchu) oraz wartość zegara. Ruchy, przy których któraś z ocen jest oceną matu (`#n`), są pomijane, bo nie ma pary ocen liczbowych.
 
-**Wyniki z HDFS (`data/out/full/blunder_in_trouble/part-00000`):**
+**Wyniki z HDFS (`data/out/full/blunder_in_trouble/part-00000`; poniżej 20 pierwszych z 49 wierszy, pozostałe dotyczą rapid, classical i ultrabullet):**
 
 ```
 blitz|1200|ok	1919137,359076
@@ -132,14 +133,27 @@ bullet|u1200|trouble	47110,15464
 - Bullet 1200–1599, normalny czas: 140637 / 713236 = **19,7% błędów**
 - Bullet 1200–1599, pod flagą: 26999 / 90961 = **29,7% błędów** (wzrost o ~51%)
 
+**Względny wzrost odsetka błędów pod flagą (przeliczony z pełnego pliku wynikowego):**
+
+| Tempo | <1200 | 1200 | 1600 | 2000 | 2400+ |
+|---|---|---|---|---|---|
+| blitz | +45% | +57% | +67% | +86% | +121% |
+| bullet | +45% | +51% | +52% | +64% | +99% |
+| rapid | +49% | +64% | +73% | +102% | +147% |
+| ultrabullet | +79% | +52% | +56% | +57% | +75% |
+
+W blitzu i bulleciu wzrost rośnie z poziomem Elo (od +45% do +121%); w punktach procentowych różnica wynosi od 9,5 do 13,3 p.p. i też jest największa dla 2400+. Ostrożnie z komórkami o małej próbie (liczba ruchów `trouble`): rapid 2400+ ma 565, ultrabullet 2400+ 811 (ruchów `ok` 906), a w partiach klasycznych `trouble` ma od 1 do 128 ruchów na komórkę (brak 2400+), więc ich nie interpretujemy. Wartości nie opatrzono testem statystycznym ani przedziałami ufności.
+
 ---
 
 ### 4.2 Analiza powrotów z przegranej pozycji (`comeback_by_tc`)
 
-**Co mierzy:** Jak często gracz wygrywa partię mimo tego, że w pewnym momencie pozycja była wyraźnie przegrana (ocena silnika <= -200 cp dla białych lub >= +200 cp dla czarnych, czyli różnica co najmniej dwóch pionów). Tylko partie rozstrzygnięte (bez remisów). Grupowanie po tempie gry.
+**Co mierzy:** Jaki odsetek partii rozstrzygniętych (bez remisów, z co najmniej jedną oceną liczbową) wygrał gracz, który w którymś momencie według oceny z pliku był gorszy o co najmniej dwa piony (ocena <= -200 cp z perspektywy białych, gdy wygrały białe, albo >= +200 cp, gdy wygrały czarne). Wystarcza jedna taka ocena w całej partii. Grupowanie po tempie gry.
+
+Uwaga o definicji: mianownikiem są wszystkie rozstrzygnięte partie z oceną, a nie tylko te, w których któraś ze stron była gorsza o dwa piony. Wynik nie jest więc prawdopodobieństwem wygranej z gorszej pozycji, tylko udziałem partii, w których zwycięzca kiedyś był gorszy o >= 2 piony.
 
 **Klucz MapReduce:** `tempo`
-**Wartości:** `(n, comeback)` – liczba analizowanych partii, liczba tych z powrotem.
+**Wartości:** `(n, comeback)` – liczba rozstrzygniętych partii z oceną, liczba tych, w których zwycięzca kiedyś był gorszy o >= 2 piony.
 
 **Wyniki z HDFS (`data/out/full/comeback_by_tc/part-00000`):**
 
@@ -152,13 +166,13 @@ ultrabullet	1850,1429
 ```
 
 **Interpretacja:**
-- Blitz: 49312 / 104385 = **47,2% powrotów** z pozycji gorszej o >= 2 piony
-- Bullet: 27708 / 49770 = **55,7% powrotów** – najwyższy odsetek
-- Rapid: 33670 / 73355 = **45,9% powrotów**
-- Classical: 1776 / 4394 = **40,4% powrotów** – najniższy odsetek
-- Ultrabullet: 1429 / 1850 = **77,2%** – przy najkrótszym tempie oceny silnika często jeszcze nie odzwierciedlają faktycznej gry
+- Blitz: 49312 / 104385 = **47,2%** partii z powrotem (n = 104385)
+- Bullet: 27708 / 49770 = **55,7%** (n = 49770)
+- Rapid: 33670 / 73355 = **45,9%** (n = 73355)
+- Classical: 1776 / 4394 = **40,4%** (n = 4394) – najniższy odsetek
+- Ultrabullet: 1429 / 1850 = **77,2%** (n = 1850) – najwyższy odsetek, ale próba jest 56 razy mniejsza niż w blitzu
 
-Wysoki odsetek w bullet i ultrabullet sugeruje, że przy krótkich kontrolach czasu ocena silnika jest mniej przewidywalna jako wskaźnik ostatecznego wyniku – błędy końcowe dominują nad jakością pozycji.
+Odsetek rośnie wraz ze skracaniem tempa, ale nie mamy dowodu na przyczynę. Przy krótkich kontrolach czasu ocena silnika może słabiej przewidywać wynik, a definicja (jedna ocena <= -200 w całej partii, zwycięzca bywa chwilowo gorszy) sprzyja wysokim wartościom. Wynik dla ultrabulleta (77,2%, n = 1850) może być artefaktem definicji i małej, nielosowej próby (tylko partie z `[%eval]`), więc traktujemy go jako niepewny.
 
 ---
 
@@ -171,7 +185,7 @@ Wysoki odsetek w bullet i ultrabullet sugeruje, że przy krótkich kontrolach cz
 **Klucz MapReduce:** `tempo|elo_bucket|time_bucket`
 **Wartości:** `(n_moves, sum_cpl)` – liczba ruchów, suma strat centypionów.
 
-Czas namysłu liczony jest jako różnica między zegarem poprzedniego własnego ruchu a zegarem bieżącego ruchu (plus inkrement). Ujemne wartości (np. przy niepełnych danych zegara) są odrzucane.
+Czas namysłu liczony jest jako różnica między zegarem poprzedniego własnego ruchu a zegarem bieżącego ruchu (plus inkrement). Dla pierwszego ruchu gracza odejmowany jest zegar od czasu początkowego. Ujemne wartości są odrzucane.
 
 **Wyniki z HDFS (`data/out/full/think_vs_cpl/part-00000`):**
 
@@ -213,15 +227,15 @@ Trzy wykresy wygenerowane przez `src/charts.py` (matplotlib) zapisane w `plots/`
 
 ### `plots/blunder.png` – Błędy przy fladze i z czasem
 
-Wykres grupowany wg tempa i kubełka ELO, porównujący odsetek błędów w stanie `trouble` i `ok`. Główny wniosek: **presja czasu zwiększa odsetek blunderów o 50–70%** niezależnie od poziomu graczy. Efekt jest silniejszy dla bullet niż blitz – gracze w bullet częściej trafiają w stan `trouble`, a jednocześnie mają mniej czasu na reakcję. Gracze z rankingiem 2400+ wykazują mniejszy wzrost odsetka błędów pod presją czasu niż gracze słabsi.
+Wykres grupowany wg tempa i kubełka ELO, porównujący odsetek błędów w stanie `trouble` i `ok`. Główny wniosek: **presja czasu zwiększa odsetek blunderów** we wszystkich komórkach o dużej próbie, względnie o +45% do +147% (blitz i bullet: +45% do +121%), a wzrost jest tym większy, im wyższe Elo. W blitzu względny wzrost jest zwykle większy niż w bulleciu (np. 1200–1599: +57% wobec +51%). Gracze 2400+ mają największy względny wzrost (blitz +121%, bullet +99%), choć ich odsetek błędów w stanie `ok` jest najniższy, więc względny przyrost liczony jest od mniejszej podstawy.
 
 ### `plots/comeback.png` – Powrót z pozycji gorszej o dwa piony
 
-Wykres słupkowy z odsetkiem powrotów dla każdego tempa. Klasycy (40,4%) rzadziej wracają niż gracze blitz (47,2%) i bullet (55,7%). Interpretacja: przy wolnym tempie oceny silnika lepiej odzwierciedlają faktyczny potencjał pozycji – jeśli jest źle, rzadziej udaje się odwrócić losy. Przy szybkich tempach błędy końcówki i presja czasu sprawiają, że ocena pozycji słabiej przewiduje wynik.
+Wykres słupkowy z odsetkiem powrotów dla każdego tempa. W partiach klasycznych (40,4%) odsetek jest niższy niż w blitzu (47,2%) i bulleciu (55,7%). Możliwe wyjaśnienie, nieprzetestowane: przy wolnym tempie ocena silnika lepiej przewiduje wynik, a przy szybkim presja czasu częściej odwraca partię. Dodatkowo wartości dla ultrabulleta (77,2%, n = 1850) nie należy traktować jako wyniku pewnego.
 
 ### `plots/namysl.png` – Czas namysłu a strata centypionów
 
-Wykresy panelowe osobno dla każdego tempa i kubełka ELO, z trzema słupkami (0–2 s, 2–10 s, 10+ s). Paradoks „dłuższy namysł, gorszy ruch" jest konsekwentny we wszystkich segmentach. Silniejsi gracze (ELO 2400+) wykazują mniejszą bezwzględną stratę centypionów w każdym kubełku czasu, lecz podobny wzorzec względny.
+Wykresy panelowe osobno dla każdego tempa i kubełka ELO, z trzema słupkami (0–2 s, 2–10 s, 10+ s). Paradoks „dłuższy namysł, gorszy ruch" występuje w blitzu i bulleciu we wszystkich kubełkach Elo; w rapid, klasycznych partiach i ultrabulleciu wzorzec jest nieregularny lub odwrotny (np. rapid 2400+, classical 1600+). Silniejsi gracze (ELO 2400+) wykazują mniejszą bezwzględną stratę centypionów w każdym kubełku czasu, lecz podobny wzorzec względny.
 
 ---
 
@@ -240,7 +254,7 @@ Po zakończeniu trzech jobów Hadoop wyniki wczytywane są do MongoDB Atlas prze
 
 **Metadane lokalne:** po każdym udanym wgraniu do Atlasu w lokalnej kolekcji `import_runs` zapisywany jest wpis z: `source_month`, `hdfs_path`, liczbą wgranych dokumentów (`documents`) i łączną liczbą wierszy wynikowych (`rows`), znacznikiem czasu.
 
-**Weryfikacja:** `src/verify_idempotent.py` porównuje sumy kontrolne agregatów przed i po ponownym wgraniu, potwierdzając niezmienność danych.
+**Weryfikacja:** `src/verify_idempotent.py` sprawdza liczbę dokumentów (`count_documents`): dla `fide_top` po dwóch kolejnych przebiegach scrapera, dla `aggregates` przed i po ponownym `update_one(..., upsert=True)` dokumentów odczytanych z tej samej kolekcji. Nie porównuje sum kontrolnych ani wartości pól, więc potwierdza brak duplikatów, a nie niezmienność treści.
 
 ---
 
@@ -268,19 +282,19 @@ Wszystkie testy przechodzą (`pytest` zwraca kod 0). Fixtury PGN w `tests/fixtur
 
 ### Główne wyniki
 
-1. **Presja czasowa istotnie zwiększa odsetek błędów** – gracze pod flagą popełniają o ~50–70% więcej blunderów niż przy normalnym czasie, niezależnie od tempa i rankingu ELO.
+1. **Presja czasowa zwiększa odsetek błędów** – gracze pod flagą (zegar <= 10 s) mają względnie o +45% do +147% wyższy odsetek blunderów niż przy normalnym czasie; wzrost jest największy dla najwyższego Elo. Nie wykonano testów statystycznych, a komórki o małej próbie (klasyczne, część 2400+) pominięto.
 
-2. **Odsetek powrotów z pozycji gorszej maleje wraz ze wzrostem kontroli czasu** – przy blitzu i bullecie wynik zależy w większym stopniu od błędów końcowych niż od jakości strategicznej; klasyk jest bardziej deterministyczny.
+2. **Udział partii z „powrotem" (zwycięzca kiedyś gorszy o >= 2 piony) maleje wraz z wydłużaniem tempa** (od 77,2% w ultrabulleciu, n = 1850, do 40,4% w klasycznych) – jedna możliwa interpretacja to większy wpływ błędów końcowych w szybkich partiach, ale nie została przetestowana, a wartość ultrabulleta jest niepewna.
 
 3. **Paradoks czasu namysłu** – dłuższy czas poświęcony na ruch koreluje z wyższą stratą centypionów, bo gracze namyślają się dłużej właśnie w trudniejszych pozycjach.
 
 ### Ograniczenia i możliwe rozszerzenia
 
-- **Jedno źródło danych** – wyniki dotyczą tylko graczy Lichess z września 2026; mogą nie być reprezentatywne dla innych platform (Chess.com, FIDE OTB).
+- **Jedno źródło danych i nielosowy wycinek** – wyniki dotyczą tylko pierwszych ~5,5 GB PGN z września 2026 (graczy Lichess), tylko partii z ocenami `[%eval]`; mogą nie być reprezentatywne dla innych platform (Chess.com, FIDE OTB).
 - **Brak kontroli zmiennych** – analiza jest korelacyjna, nie przyczynowo-skutkowa; np. wyższy ELO koreluje z lepszym zarządzaniem czasem.
 - **Brak ocen dla wszystkich ruchów** – analiza opiera się na adnotacjach silnika dołączonych przez Lichess; nie wszystkie partie mają `[%eval]`.
 - **Możliwe rozszerzenia:** analiza openingów ECO, wpływ liczby ruchów partii na odsetek błędów, porównanie miesięczne (trend czasowy), integracja z rankingiem FIDE do potwierdzenia, że top-100 zachowuje się inaczej niż ogół.
 
 ### Wnioski techniczne
 
-Hadoop Streaming okazał się praktycznym narzędziem do przetwarzania pliku PGN ~5,5 GB z jednym splittem. Podejście „jeden plik, jeden split, jeden reducer" uprościło zarządzanie granicami partii w strumieniu. Idempotentny upsert do MongoDB Atlas z indeksem złożonym zapewnił bezpieczne wielokrotne wgrywanie wyników bez ryzyka duplikacji danych.
+Hadoop Streaming posłużył do przetworzenia pliku PGN ~5,5 GB (po rozpakowaniu) z jednym splittem, czyli bez równoległości map. Podejście „jeden plik, jeden split, jeden reducer" uprościło zarządzanie granicami partii w strumieniu. Idempotentny upsert do MongoDB Atlas z indeksem złożonym zapewnił bezpieczne wielokrotne wgrywanie wyników bez ryzyka duplikacji danych.
