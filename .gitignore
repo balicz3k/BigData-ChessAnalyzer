@@ -35,3 +35,11 @@ docs/PROMPTY.md
 .cursor/
 .agents/
 REVIEW.md
+
+# Pliki pomocnicze LaTeX-a
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
