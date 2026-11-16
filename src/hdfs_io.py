@@ -1,4 +1,9 @@
-"""Wysłanie PGN do HDFS z nadpisaniem. Drugi raz przy tym samym SHA-256 nic nie dopisuje."""
+"""Wysłanie PGN do HDFS (polecenia ``hdfs dfs`` w kontenerze Hadoop).
+
+Ponowne wysłanie nie powiela danych: plik jest nadpisywany (``-put -f``) albo
+pomijany, gdy w HDFS jest już ten sam plik (ten sam rozmiar, a dla pojedynczego
+pliku także ten sam SHA-256 zapisany w ``import_runs``).
+"""
 
 from __future__ import annotations
 
@@ -117,4 +122,42 @@ def upload_pgn(local: Path, hdfs_path: str, source_url: str) -> str:
     finally:
         client.close()
     print(f"HDFS nadpisany: {hdfs_path} ({nbytes} bajtów)")
+    return "uploaded"
+
+
+def upload_parts(paths: list[Path], hdfs_dir: str) -> str:
+    """Wysyła części PGN do katalogu ``hdfs_dir``. Pomija, gdy wszystkie mają już te rozmiary."""
+    remote = {Path(p).name: remote_size(f"{hdfs_dir}/{Path(p).name}") for p in paths}
+    local = {p.name: p.stat().st_size for p in paths}
+    listing = hdfs_exec(["dfs", "-ls", "-C", hdfs_dir])
+    remote_names = {Path(line).name for line in listing.stdout.split()} if listing.returncode == 0 else set()
+    if remote == local and remote_names == set(local):
+        print(f"HDFS bez zmian: {hdfs_dir} ma {len(paths)} części, rozmiary zgodne")
+        return "skipped"
+
+    # katalog od nowa, żeby nie zostały stare części przy innej liczbie plików
+    hdfs_exec(["dfs", "-rm", "-r", "-f", "-skipTrash", hdfs_dir])
+    proc = hdfs_exec(["dfs", "-mkdir", "-p", hdfs_dir])
+    if proc.returncode != 0:
+        raise SystemExit("BŁĄD: hdfs dfs -mkdir nie powiódł się:\n" + _safe_err(proc.stderr))
+    proc = hdfs_exec(["dfs", "-put", "-f", *[container_path(p) for p in paths], hdfs_dir])
+    if proc.returncode != 0:
+        raise SystemExit("BŁĄD: hdfs dfs -put nie powiódł się:\n" + _safe_err(proc.stderr))
+    for name, nbytes in local.items():
+        stored = remote_size(f"{hdfs_dir}/{name}")
+        if stored != nbytes:
+            raise SystemExit(f"BŁĄD: {name}: lokalnie {nbytes} B, w HDFS {stored} B")
+
+    client = local_client()
+    try:
+        record_import(
+            client,
+            "hdfs_pgn_parts",
+            hdfs_path=hdfs_dir,
+            files=len(paths),
+            bytes=sum(local.values()),
+        )
+    finally:
+        client.close()
+    print(f"HDFS: wysłano {len(paths)} części do {hdfs_dir} ({sum(local.values())} B)")
     return "uploaded"
