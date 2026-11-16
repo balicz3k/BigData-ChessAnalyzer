@@ -160,7 +160,3 @@ Kolekcja `import_runs` lokalnie. Jeden dokument na pipeline (`hdfs_pgn`, `fide_s
 Gdy SHA-256 pliku lokalnego jest zgodny z ostatnim `import_runs` i rozmiar w HDFS jest ten sam, ponowny import pliku nic nie dopisuje.
 
 Połączenie lokalne: `tls=True` i plik CA. Bez `tlsAllowInvalidCertificates`. Atlas: URI `mongodb+srv`. Hasła tylko w `.env`, nigdy w kodzie.
-
-## Kod poprzednich jobów
-
-Funkcje `ply_job`, `clock_job` (`src/pgn.py`) i `accuracy_job` (`src/accuracy.py`) zostają w repozytorium, bo testy etapu 1 na nich stoją. Obowiązujące analizy MapReduce są trzy i są opisane wyżej. Ich wzory są w `src/analyses.py` i wołają wspólne `centipawn_loss`, tempo i kubełki, zamiast kopiować je do mapperów.

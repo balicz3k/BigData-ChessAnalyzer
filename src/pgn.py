@@ -1,9 +1,7 @@
 """Parser PGN z Lichess oraz wspólne czyszczenie, tempo i kubełki Elo.
 
-Parsowanie zapisu, czyszczenie nagłówków, tempo i kubełki Elo żyją tutaj.
-Obowiązujące trzy analizy (błąd przy fladze, powrót, czas namysłu) są w
-``src/analyses.py`` i importują stąd progi oraz parser. ``ply_job`` i ``clock_job``
-zostają, bo stoją na nich testy etapu 1. Definicje metryk: docs/DANE-I-ANALIZY.md.
+Same analizy (błąd przy fladze, powrót, czas namysłu) są w ``src/analyses.py``
+i biorą stąd parser oraz progi. Definicje metryk: docs/DANE-I-ANALIZY.md.
 
 Kod celowo używa tylko biblioteki standardowej, bo mapper dostaje go przez ``-files``
 i działa na węźle bez naszego virtualenva.
@@ -20,11 +18,6 @@ from dataclasses import dataclass, field
 REJECT_RESULT = "result"
 REJECT_ELO = "elo"
 REJECT_TIMECONTROL = "timecontrol"
-REJECT_NO_CLK = "no_clk"
-REJECT_FEW_EVALS = "few_evals"
-
-WHITE = "white"
-BLACK = "black"
 
 # Gracz ma czasówkę, gdy którykolwiek jego zegar jest mniejszy lub równy tej wartości.
 TIME_TROUBLE_SECONDS = 10
@@ -235,49 +228,3 @@ def elo_bucket(elo: float) -> str:
 def player_elos(headers: Mapping[str, str]) -> tuple[int, int]:
     """(WhiteElo, BlackElo). Zakłada partię, która przeszła ``header_reject_reason``."""
     return int(headers["WhiteElo"]), int(headers["BlackElo"])
-
-
-# --- job ply_by_tc_elo (zachowany na potrzeby testów etapu 1) -------------------------
-
-
-def ply_job(game: RawGame) -> JobResult:
-    """Jeden rekord na partię: klucz ``tempo|kubełek średniego Elo``, liczby ``(n, sum_plies)``."""
-    reason = header_reject_reason(game.headers)
-    if reason:
-        return JobResult(reject=reason)
-    white_elo, black_elo = player_elos(game.headers)
-    key = f"{tempo_of(game.headers)}|{elo_bucket((white_elo + black_elo) / 2)}"
-    return JobResult(records=((key, (1, len(parse_movetext(game.movetext)))),))
-
-
-# --- job time_trouble_by_tc --------------------------------------------------------------
-
-
-def clock_job(game: RawGame) -> JobResult:
-    """Jeden rekord na stronę: klucz ``tempo|white`` albo ``tempo|black``.
-
-    Liczby: ``(n, trouble, trouble_loss, ok_loss)``. Nieparzysty półruch to białe, parzysty
-    czarne. Zgodnie ze specyfikacją strona dostaje rekord także wtedy, gdy nie ma ani
-    jednego zegara (np. czarne po jednym półruchu): wtedy ``trouble`` = 0.
-    """
-    reason = header_reject_reason(game.headers)
-    if reason:
-        return JobResult(reject=reason)
-    plies = parse_movetext(game.movetext)
-    if not any(p.clk is not None for p in plies):
-        return JobResult(reject=REJECT_NO_CLK)
-
-    tempo = tempo_of(game.headers)
-    result = game.headers["Result"]
-    records = []
-    for side, offset, loses_on in ((WHITE, 0, "0-1"), (BLACK, 1, "1-0")):
-        clocks = [p.clk for p in plies[offset::2] if p.clk is not None]
-        trouble = any(c <= TIME_TROUBLE_SECONDS for c in clocks)
-        lost = result == loses_on
-        records.append(
-            (
-                f"{tempo}|{side}",
-                (1, int(trouble), int(trouble and lost), int(not trouble and lost)),
-            )
-        )
-    return JobResult(records=tuple(records))

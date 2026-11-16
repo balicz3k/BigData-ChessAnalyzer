@@ -15,11 +15,17 @@ from src.analyses import (
     REJECT_NO_QUALIFYING,
     REJECT_NOT_DECISIVE,
     blunder_job,
+    centipawn_loss,
     comeback_job,
     think_bucket,
     think_job,
 )
 from src.pgn import REJECT_ELO, REJECT_RESULT, REJECT_TIMECONTROL, TIME_TROUBLE_SECONDS
+
+
+@pytest.mark.parametrize(("before", "after", "loss"), [(20, -10, 30), (-40, -200, 160), (10, 50, 0), (0, 0, 0)])
+def test_strata_centypionow_nie_jest_ujemna(before, after, loss):
+    assert centipawn_loss(before, after) == loss
 
 
 def test_prog_bledu_i_flagi_sa_stalymi_ze_specyfikacji():

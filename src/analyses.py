@@ -1,13 +1,12 @@
 """Trzy obowiązujące analizy: błąd przy fladze, powrót z przegranej, czas namysłu.
 
 Wzory są tylko tutaj (docs/DANE-I-ANALIZY.md). Mappery Hadoopa importują te funkcje.
-Strata centypionów, tempo i kubełki Elo pochodzą z ``src.accuracy`` i ``src.pgn``
-i nie są tu liczone drugi raz. Silnika szachowego nie uruchamiamy.
+Tempo, kubełki Elo i parser pochodzą z ``src.pgn``. Silnika szachowego nie
+uruchamiamy: korzystamy tylko z ocen [%eval] zapisanych w pliku PGN.
 """
 
 from __future__ import annotations
 
-from src.accuracy import centipawn_loss
 from src.pgn import (
     TIME_TROUBLE_SECONDS,
     JobResult,
@@ -33,6 +32,11 @@ REJECT_NO_EVAL = "no_eval"
 
 WHITE_SIDE = 0
 BLACK_SIDE = 1
+
+
+def centipawn_loss(cp_before: int, cp_after: int) -> int:
+    """Strata centypionów ruchu z perspektywy gracza, który go wykonał (nie mniej niż 0)."""
+    return max(0, cp_before - cp_after)
 
 
 def think_bucket(seconds: int) -> str | None:
