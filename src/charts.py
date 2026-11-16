@@ -1,4 +1,8 @@
-"""Trzy wykresy z wyników jobów. Osie po polsku. Bullet nie jest uśredniany z klasykiem."""
+"""Trzy wykresy z wyników jobów (pliki TSV). Osie po polsku, każde tempo osobno.
+
+Komórki z małą próbą (mniej niż ``MIN_SAMPLE`` ruchów albo partii) są
+kreskowane albo mają puste kółko, żeby nie wyciągać z nich wniosków.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.patches import Patch  # noqa: E402
 
 from src.aggregate import read_tsv, totals_from_rows
 
@@ -25,6 +30,9 @@ ELO_LABELS = {
 THINK_ORDER = ("0-2", "2-10", "10+")
 THINK_LABELS = {"0-2": "0–2 s", "2-10": "2–10 s", "10+": "10+ s"}
 
+# Poniżej tylu ruchów (albo partii) wynik komórki uznajemy za niepewny.
+MIN_SAMPLE = 1000
+
 LABEL_TROUBLE = "Pod flagą"
 LABEL_OK = "Z czasem"
 LABEL_BLUNDER_Y = "Odsetek błędów (%)"
@@ -36,6 +44,14 @@ LABEL_TEMPO_X = "Tempo"
 TITLE_BLUNDER = "Błędy przy fladze i z czasem"
 TITLE_COMEBACK = "Powrót z pozycji gorszej o dwa piony"
 TITLE_THINK = "Czas namysłu a strata centypionów"
+NOTE_SMALL = f"kreskowane / puste kółka: mniej niż {MIN_SAMPLE} ruchów, wynik niepewny"
+
+COLOR_TROUBLE = "#b3473a"
+COLOR_OK = "#3d7a5a"
+COLOR_ANY = "#3d5a80"
+COLOR_HELD = "#98c1d9"
+
+plt.rcParams.update({"font.size": 11, "axes.titlesize": 12, "legend.fontsize": 9})
 
 
 def blunder_panels(rows) -> dict[str, dict[str, dict[str, tuple[int, int]]]]:
@@ -47,9 +63,9 @@ def blunder_panels(rows) -> dict[str, dict[str, dict[str, tuple[int, int]]]]:
     return panels
 
 
-def comeback_rates(rows) -> dict[str, tuple[int, int]]:
-    """tempo -> (n, comeback). Jedno tempo, jedna liczba, bez średniej z innych."""
-    return {key: (nums[0], nums[1]) for key, nums in totals_from_rows(rows).items()}
+def comeback_rates(rows) -> dict[str, tuple[int, ...]]:
+    """tempo -> (n, comeback, comeback_held). Jedno tempo, jedna liczba, bez średniej z innych."""
+    return dict(totals_from_rows(rows))
 
 
 def think_panels(rows) -> dict[str, dict[str, dict[str, tuple[int, int]]]]:
@@ -72,62 +88,88 @@ def _rate(part: int, whole: int) -> float:
     return 100.0 * part / whole
 
 
+def _grid(count: int):
+    """Panele w dwóch kolumnach, żeby wykres nie był bardzo wysoki i wąski."""
+    cols = 2 if count > 1 else 1
+    rows = (count + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(13, 4.2 * rows), squeeze=False, layout="constrained")
+    flat = list(axes.flat)
+    for ax in flat[count:]:
+        ax.set_axis_off()  # pusty panel, gdy liczba temp jest nieparzysta
+    return fig, flat[:count]
+
+
 def plot_blunder(rows, dest: Path) -> None:
     panels = blunder_panels(rows)
     tempos = _tempos_present(panels)
     if not tempos:
         _empty(dest, TITLE_BLUNDER, LABEL_BLUNDER_Y)
         return
-    fig, axes = plt.subplots(len(tempos), 1, figsize=(10, 3.2 * len(tempos)), squeeze=False, layout="constrained")
-    fig.suptitle(TITLE_BLUNDER)
-    for ax, tempo in zip(axes[:, 0], tempos):
+    fig, axes = _grid(len(tempos))
+    fig.suptitle(f"{TITLE_BLUNDER}\n({NOTE_SMALL})", fontsize=13)
+    for ax, tempo in zip(axes, tempos):
         elos = [elo for elo in ELO_ORDER if elo in panels[tempo]]
-        xs = list(range(len(elos)))
-        trouble = [_rate(*_pair(panels[tempo][elo], "trouble")) for elo in elos]
-        ok = [_rate(*_pair(panels[tempo][elo], "ok")) for elo in elos]
-        ax.bar([x - 0.18 for x in xs], trouble, width=0.36, label=LABEL_TROUBLE, color="#b3473a")
-        ax.bar([x + 0.18 for x in xs], ok, width=0.36, label=LABEL_OK, color="#3d7a5a")
-        ax.set_xticks(xs, [ELO_LABELS[elo] for elo in elos])
+        for shift, state, label, color in ((-0.2, "trouble", LABEL_TROUBLE, COLOR_TROUBLE), (0.2, "ok", LABEL_OK, COLOR_OK)):
+            for x, elo in enumerate(elos):
+                n, blunders = panels[tempo][elo].get(state, (0, 0))
+                if n == 0:
+                    continue  # brak ruchów w tej komórce, nie rysujemy zerowego słupka
+                ax.bar(
+                    x + shift,
+                    _rate(blunders, n),
+                    width=0.4,
+                    color=color,
+                    hatch="///" if n < MIN_SAMPLE else None,
+                    edgecolor="white" if n < MIN_SAMPLE else color,
+                )
+        ax.set_xticks(range(len(elos)), [ELO_LABELS[elo] for elo in elos])
         ax.set_ylabel(LABEL_BLUNDER_Y)
         ax.set_xlabel(LABEL_ELO_X)
         ax.set_title(tempo)
-        ax.legend()
-    fig.savefig(dest, dpi=120)
+        ax.grid(axis="y", alpha=0.3)
+        ax.legend(handles=[Patch(color=COLOR_TROUBLE, label=LABEL_TROUBLE), Patch(color=COLOR_OK, label=LABEL_OK)])
+    fig.savefig(dest, dpi=130)
     plt.close(fig)
-
-
-def _pair(elo_map: dict, state: str) -> tuple[int, int]:
-    nums = elo_map.get(state)
-    if not nums or nums[0] == 0:
-        return 0, 0
-    return nums[1], nums[0]
 
 
 def plot_comeback(rows, dest: Path) -> None:
     rates = comeback_rates(rows)
     tempos = _tempos_present(rates)
-    fig, ax = plt.subplots(figsize=(8, 4.5), layout="constrained")
+    fig, ax = plt.subplots(figsize=(9, 5), layout="constrained")
     fig.suptitle(TITLE_COMEBACK)
     if not tempos:
         ax.text(0.5, 0.5, "Brak danych", ha="center", va="center")
         ax.set_axis_off()
-    else:
-        xs = list(range(len(tempos)))
-        values = [_rate(rates[tempo][1], rates[tempo][0]) for tempo in tempos]
-        bars = ax.bar(xs, values, color="#3d5a80")
-        ax.set_xticks(xs, tempos)
-        ax.set_ylabel(LABEL_COMEBACK_Y)
-        ax.set_xlabel(LABEL_TEMPO_X)
-        for bar, tempo in zip(bars, tempos):
-            n, comeback = rates[tempo]
-            ax.annotate(
-                f"{_rate(comeback, n):.1f}%\n(n={n})",
-                xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
-                ha="center",
-                va="bottom",
-                fontsize=8,
-            )
-    fig.savefig(dest, dpi=120)
+        fig.savefig(dest, dpi=130)
+        plt.close(fig)
+        return
+    for x, tempo in enumerate(tempos):
+        n, comeback = rates[tempo][0], rates[tempo][1]
+        held = rates[tempo][2] if len(rates[tempo]) > 2 else None
+        small = n < MIN_SAMPLE
+        bar = ax.bar(
+            x - 0.2, _rate(comeback, n), width=0.4, color=COLOR_ANY,
+            hatch="///" if small else None,
+        )[0]
+        ax.annotate(f"{_rate(comeback, n):.1f}%", (bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                    ha="center", va="bottom", fontsize=9)
+        if held is not None:
+            bar = ax.bar(
+                x + 0.2, _rate(held, n), width=0.4, color=COLOR_HELD,
+                hatch="///" if small else None,
+            )[0]
+            ax.annotate(f"{_rate(held, n):.1f}%", (bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                        ha="center", va="bottom", fontsize=9)
+    ax.set_xticks(range(len(tempos)), [f"{tempo}\nn = {rates[tempo][0]}" for tempo in tempos])
+    ax.set_ylabel(LABEL_COMEBACK_Y)
+    ax.set_xlabel(LABEL_TEMPO_X + " (n = liczba rozstrzygniętych partii z oceną)")
+    ax.set_ylim(0, 100)
+    ax.grid(axis="y", alpha=0.3)
+    handles = [Patch(color=COLOR_ANY, label="choć jedna ocena")]
+    if any(len(nums) > 2 for nums in rates.values()):
+        handles.append(Patch(color=COLOR_HELD, label="6 ocen z rzędu"))
+    ax.legend(handles=handles, title="zwycięzca gorszy o ≥ 2 piony", loc="upper right")
+    fig.savefig(dest, dpi=130)
     plt.close(fig)
 
 
@@ -137,25 +179,28 @@ def plot_think(rows, dest: Path) -> None:
     if not tempos:
         _empty(dest, TITLE_THINK, LABEL_THINK_Y)
         return
-    fig, axes = plt.subplots(len(tempos), 1, figsize=(10, 3.2 * len(tempos)), squeeze=False, layout="constrained")
-    fig.suptitle(TITLE_THINK)
+    fig, axes = _grid(len(tempos))
+    fig.suptitle(f"{TITLE_THINK}\n({NOTE_SMALL})", fontsize=13)
     xs = list(range(len(THINK_ORDER)))
-    for ax, tempo in zip(axes[:, 0], tempos):
+    for ax, tempo in zip(axes, tempos):
         for elo in ELO_ORDER:
             buckets = panels[tempo].get(elo, {})
             if not buckets:
                 continue
-            ys = []
-            for bucket in THINK_ORDER:
-                cell = buckets.get(bucket)
-                ys.append(cell[1] / cell[0] if cell and cell[0] else float("nan"))
-            ax.plot(xs, ys, marker="o", label=ELO_LABELS[elo])
+            cells = [buckets.get(bucket, (0, 0)) for bucket in THINK_ORDER]
+            ys = [s / n if n else float("nan") for n, s in cells]
+            line = ax.plot(xs, ys, linewidth=2, label=ELO_LABELS[elo])[0]
+            for x, y, (n, _s) in zip(xs, ys, cells):
+                small = n < MIN_SAMPLE
+                ax.plot(x, y, "o", markersize=8, color=line.get_color(),
+                        markerfacecolor="white" if small else line.get_color())
         ax.set_xticks(xs, [THINK_LABELS[bucket] for bucket in THINK_ORDER])
         ax.set_ylabel(LABEL_THINK_Y)
         ax.set_xlabel(LABEL_THINK_X)
         ax.set_title(tempo)
+        ax.grid(alpha=0.3)
         ax.legend(title=LABEL_ELO_X)
-    fig.savefig(dest, dpi=120)
+    fig.savefig(dest, dpi=130)
     plt.close(fig)
 
 
@@ -164,15 +209,16 @@ def _empty(dest: Path, title: str, ylabel: str) -> None:
     fig.suptitle(title)
     ax.set_ylabel(ylabel)
     ax.text(0.5, 0.5, "Brak danych", ha="center", va="center", transform=ax.transAxes)
-    fig.savefig(dest, dpi=120)
+    fig.savefig(dest, dpi=130)
     plt.close(fig)
 
 
-def plot_all(blunder_rows, comeback_rows, think_rows, out_dir: Path) -> None:
+def plot_all(blunder_rows, comeback_rows, think_rows, out_dir: Path, ext: str = "png") -> None:
+    """Zapisuje blunder, comeback i namysl jako ``ext`` (png do repo, pdf do sprawozdania)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    plot_blunder(blunder_rows, out_dir / "blunder.png")
-    plot_comeback(comeback_rows, out_dir / "comeback.png")
-    plot_think(think_rows, out_dir / "namysl.png")
+    plot_blunder(blunder_rows, out_dir / f"blunder.{ext}")
+    plot_comeback(comeback_rows, out_dir / f"comeback.{ext}")
+    plot_think(think_rows, out_dir / f"namysl.{ext}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -180,10 +226,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--blunder", type=Path, required=True)
     parser.add_argument("--comeback", type=Path, required=True)
     parser.add_argument("--think", type=Path, required=True)
-    parser.add_argument("--out", type=Path, default=Path("out"))
+    parser.add_argument("--out", type=Path, default=Path("plots"))
+    parser.add_argument("--ext", choices=("png", "pdf"), default="png")
     args = parser.parse_args(argv)
-    plot_all(read_tsv(args.blunder), read_tsv(args.comeback), read_tsv(args.think), args.out)
-    print(f"zapisano {args.out / 'blunder.png'}, {args.out / 'comeback.png'}, {args.out / 'namysl.png'}")
+    plot_all(read_tsv(args.blunder), read_tsv(args.comeback), read_tsv(args.think), args.out, args.ext)
+    print(f"zapisano blunder, comeback i namysl ({args.ext}) w {args.out}")
     return 0
 
 
