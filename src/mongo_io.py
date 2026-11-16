@@ -1,7 +1,7 @@
 """Połączenia Mongo i metadane importu. Hasła zostają w ``.env``, nigdy w kodzie.
 
 Lokalne Mongo: TLS i plik CA, bez ``tlsAllowInvalidCertificates``.
-Atlas: tylko gdy ``ATLAS_URI`` jest ustawione. Agregaty nie mają innej bazy zapasowej.
+Atlas: adres ``mongodb+srv://`` z ``ATLAS_URI`` (TLS jest tam włączony domyślnie).
 """
 
 from __future__ import annotations
@@ -58,13 +58,13 @@ def local_uri() -> str:
 
 
 def require_atlas_uri() -> str:
-    """Puste ``ATLAS_URI`` jest błędem. Nie podstawiamy lokalnej bazy."""
+    """Puste ``ATLAS_URI`` jest błędem: projekt wymaga drugiej bazy w chmurze."""
     load_dotenv()
     uri = os.environ.get("ATLAS_URI", "").strip()
     if not uri:
         raise SystemExit(
-            "BŁĄD: ATLAS_URI jest pusty. Agregaty idą tylko do Atlasu "
-            "i nie zapisuję ich w innym miejscu."
+            "BŁĄD: ATLAS_URI jest pusty. Uzupełnij .env adresem mongodb+srv:// "
+            "klastra Atlas (wzór w .env.example)."
         )
     _reject_insecure(uri, "ATLAS_URI")
     return uri
