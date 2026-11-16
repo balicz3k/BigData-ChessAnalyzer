@@ -29,13 +29,6 @@ htmlcov/
 .ruff_cache/
 *.egg-info/
 
-# Pliki robocze (nie commitować)
-AGENTS.md
-docs/PROMPTY.md
-.cursor/
-.agents/
-REVIEW.md
-
 # Pliki pomocnicze LaTeX-a
 *.aux
 *.log
