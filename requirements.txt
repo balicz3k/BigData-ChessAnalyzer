@@ -1,7 +1,8 @@
-pymongo
-requests
-beautifulsoup4
-matplotlib
-pytest
-zstandard
-python-dotenv
+# Wersje sprawdzone na Pythonie 3.14 (PC z Kubuntu). Mappery w kontenerze Hadoop
+# nie używają tych pakietów, tylko biblioteki standardowej Pythona 3.10.
+pymongo==4.19.0
+requests==2.34.2
+beautifulsoup4==4.15.0
+matplotlib==3.11.2
+zstandard==0.25.0
+pytest==9.1.1
