@@ -16,7 +16,7 @@ from src.mongo_io import DB_NAME, atlas_client, local_client, record_import, req
 SOURCE_MONTH = "2026-09"
 FIELDS = {
     "blunder_in_trouble": ("n_moves", "n_blunders"),
-    "comeback_by_tc": ("n", "comeback"),
+    "comeback_by_tc": ("n", "comeback", "comeback_held"),
     "think_vs_cpl": ("n_moves", "sum_cpl"),
 }
 

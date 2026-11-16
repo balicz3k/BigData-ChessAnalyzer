@@ -11,6 +11,7 @@ import pytest
 from src.analyses import (
     BLUNDER_CP,
     COMEBACK_CP,
+    COMEBACK_HOLD_EVALS,
     REJECT_NO_EVAL,
     REJECT_NO_QUALIFYING,
     REJECT_NOT_DECISIVE,
@@ -86,21 +87,35 @@ def test_powrot_bialych_przy_minus_200(make_game):
     plies = [("e4", None, "-2.00"), ("e5", None, "0.30")]
     result = comeback_job(make_game(plies, result="1-0", time_control="60+0"))
     assert result.reject is None
-    assert result.records == (("bullet", (1, 1)),)
+    assert result.records == (("bullet", (1, 1, 0)),)
 
 
 def test_powrot_czarnych_przy_plus_200(make_game):
     plies = [("e4", None, "2.00"), ("e5", None, "1.00")]
     result = comeback_job(make_game(plies, result="0-1", time_control="1800+0"))
     assert result.reject is None
-    assert result.records == (("classical", (1, 1)),)
+    assert result.records == (("classical", (1, 1, 0)),)
 
 
 def test_ocena_199_cp_nie_jest_powrotem(make_game):
     white = comeback_job(make_game([("e4", None, "-1.99")], result="1-0", time_control="60+0"))
     black = comeback_job(make_game([("e4", None, "1.99")], result="0-1", time_control="60+0"))
-    assert white.records == (("bullet", (1, 0)),)
-    assert black.records == (("bullet", (1, 0)),)
+    assert white.records == (("bullet", (1, 0, 0)),)
+    assert black.records == (("bullet", (1, 0, 0)),)
+
+
+def test_powrot_utrzymany_wymaga_szesciu_ocen_z_rzedu(make_game):
+    assert COMEBACK_HOLD_EVALS == 6
+    six = [("e4", None, "-2.50")] * 6 + [("e5", None, "0.50")]
+    five = [("e4", None, "-2.50")] * 5 + [("e5", None, "0.50")] + [("d4", None, "-2.50")] * 5
+    assert comeback_job(make_game(six, result="1-0")).records == (("blitz", (1, 1, 1)),)
+    # dwie serie po 5 nie dają utrzymanej straty, choć zwykły powrót tak
+    assert comeback_job(make_game(five, result="1-0")).records == (("blitz", (1, 1, 0)),)
+
+
+def test_powrot_utrzymany_czarnych(make_game):
+    plies = [("e4", None, "3.00")] * 6
+    assert comeback_job(make_game(plies, result="0-1")).records == (("blitz", (1, 1, 1)),)
 
 
 def test_remis_nie_wchodzi_do_powrotu(make_game):

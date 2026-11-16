@@ -16,9 +16,10 @@ def test_dokument_agregatu():
     assert docs[0]["n_moves"] == 4
     assert docs[0]["n_blunders"] == 1
     assert docs[0]["source_month"] == SOURCE_MONTH == "2026-09"
-    comeback = documents("comeback_by_tc", [("bullet", (3, 1))])
+    comeback = documents("comeback_by_tc", [("bullet", (3, 1, 0))])
     assert comeback[0]["n"] == 3
     assert comeback[0]["comeback"] == 1
+    assert comeback[0]["comeback_held"] == 0
 
 
 def test_pusty_atlas_uri_jest_bledem(monkeypatch):

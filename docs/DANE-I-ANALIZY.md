@@ -98,9 +98,13 @@ Białe wracają, gdy wygrały (`1-0`) i kiedykolwiek w partii liczba centypionó
 
 Klucz: tempo.
 
-Jeden rekord na partię: `n=1`, `comeback` równe 0 albo 1. Odsetek powrotów to `comeback / n`.
+Wariant ostrzejszy (`comeback_held`): zwycięzca był gorszy o co najmniej 2 piony przez co najmniej 6 kolejnych ocen liczbowych (3 pełne ruchy). Wprowadzony po recenzji: przy pierwszej definicji wystarczy jedna zła ocena, np. w środku wymiany figur, więc wynik mierzył też chwilowe wahania oceny, a nie prawdziwe odwrócenie losów partii.
 
-Wykres: odsetek powrotów według tempa, każde tempo osobno.
+Jeden rekord na partię: `n=1`, `comeback` i `comeback_held` równe 0 albo 1. Odsetki to `comeback / n` i `comeback_held / n`.
+
+Zastrzeżenie: mianownikiem są wszystkie rozstrzygnięte partie z oceną, a nie tylko te, w których ktoś był gorszy o 2 piony. To nie jest więc prawdopodobieństwo wygranej z gorszej pozycji, tylko udział partii, w których zwycięzca w którymś momencie przegrywał.
+
+Wykres: oba odsetki obok siebie według tempa, każde tempo osobno, z liczbą partii `n` nad słupkiem.
 
 W sprawozdaniu wprost: dotyczy około 6% partii, tych z gotowym `[%eval]`. To nie jest losowy wycinek wszystkich partii września.
 
@@ -144,7 +148,7 @@ Kolejność liczb jest stała w danym jobie:
 | Job | Liczby |
 |---|---|
 | `blunder_in_trouble` | `n_moves,n_blunders` |
-| `comeback_by_tc` | `n,comeback` |
+| `comeback_by_tc` | `n,comeback,comeback_held` |
 | `think_vs_cpl` | `n_moves,sum_cpl` |
 
 Reducer rozdziela po przecinku, sumuje pola jako `int` i wypisuje ten sam układ. Klucze z polami pustymi nie występują.
