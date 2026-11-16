@@ -88,12 +88,13 @@ def cat(hdfs_path: str) -> str:
 
 def upload_pgn(local: Path, hdfs_path: str, source_url: str) -> str:
     """Nadpisuje plik w HDFS. Ten sam SHA-256 i ten sam rozmiar pomijają wysyłkę."""
+    pipeline = "hdfs_pgn_sample" if hdfs_path == HDFS_SAMPLE else "hdfs_pgn"
     nbytes = local.stat().st_size
     digest = sha256_file(local)
     remote = remote_size(hdfs_path)
     client = local_client()
     try:
-        prev = client["chess"]["import_runs"].find_one({"pipeline": "hdfs_pgn"})
+        prev = client["chess"]["import_runs"].find_one({"pipeline": pipeline})
         prev_sha = prev.get("sha256") if prev else None
         if should_skip_upload(prev_sha, remote, digest, nbytes):
             print(f"HDFS bez zmian: {hdfs_path} ma {nbytes} bajtów, SHA-256 zgodny")
@@ -113,7 +114,7 @@ def upload_pgn(local: Path, hdfs_path: str, source_url: str) -> str:
             )
         record_import(
             client,
-            "hdfs_pgn",
+            pipeline,
             source_url=source_url,
             bytes=nbytes,
             sha256=digest,
