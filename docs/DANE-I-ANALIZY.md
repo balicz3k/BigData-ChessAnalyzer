@@ -10,7 +10,7 @@ Wzory żyją tylko w `src/`. Mapper Hadoop importuje te funkcje i nie liczy ich 
 - Plik: https://database.lichess.org/standard/lichess_db_standard_rated_2026-09.pgn.zst
 - Wrzesień 2026: 29,2 GB spakowane, 89 616 462 partie. Lichess podaje, że po rozpakowaniu plik jest około 7,1 raza większy oraz że niepełne archiwum `.zst` nadal da się rozpakować.
 - Do projektu bierzemy wycinek. Tryb deweloperski kończy się na 50 MB nieskompresowanego PGN. Tryb pełny wymaga co najmniej 5 500 000 000 bajtów i ucina na granicy partii, nie w połowie nagłówka.
-- Ścieżka HDFS: `/user/chess/raw/lichess_2026-09.pgn`
+- Ścieżka HDFS: katalog `/user/chess/raw/lichess_2026-09/` z 8 częściami `part-000.pgn` … `part-007.pgn`, podzielonymi przed liniami `[Event "` (`src/split_pgn.py`). Każda część to jeden split i jeden mapper.
 
 Od kwietnia 2017 partie mają zegar co do sekundy w komentarzu `[%clk]` przy półruchu. Około 6% partii standard ma ocenę Stockfisha `[%eval …]`, zawsze z perspektywy białych. Oceny mate (`#4`, `#-4`) pomijamy tam, gdzie potrzebna jest liczba centypionów.
 
