@@ -25,6 +25,9 @@ from src.pgn import (
 BLUNDER_CP = 100
 # Pozycja gorsza o co najmniej 2 piony (ocena z pliku, perspektywa białych).
 COMEBACK_CP = 200
+# Wariant ostrzejszy: gorsza pozycja trwa co najmniej tyle kolejnych ocen (3 pełne ruchy).
+# Jedna zła ocena bywa chwilowym "szumem" (np. w środku wymiany), sześć z rzędu już nie.
+COMEBACK_HOLD_EVALS = 6
 
 REJECT_NO_QUALIFYING = "no_qualifying"
 REJECT_NOT_DECISIVE = "not_decisive"
@@ -126,12 +129,22 @@ def blunder_job(game: RawGame) -> JobResult:
     return JobResult(records=records)
 
 
-def comeback_job(game: RawGame) -> JobResult:
-    """Jeden rekord na partię: klucz to tempo, liczby ``(n, comeback)``.
+def _longest_run(flags: list[bool]) -> int:
+    """Najdłuższa seria wartości True pod rząd."""
+    best = current = 0
+    for flag in flags:
+        current = current + 1 if flag else 0
+        best = max(best, current)
+    return best
 
-    Tylko partie rozstrzygnięte z co najmniej jedną oceną liczbową. Białe wracają,
-    gdy wygrały i kiedyś ocena z pliku była ``<= -200``. Czarne wracają, gdy wygrały
-    i kiedyś ocena była ``>= 200``.
+
+def comeback_job(game: RawGame) -> JobResult:
+    """Jeden rekord na partię: klucz to tempo, liczby ``(n, comeback, comeback_held)``.
+
+    Tylko partie rozstrzygnięte z co najmniej jedną oceną liczbową. Zwycięzca "wrócił",
+    gdy kiedyś miał ocenę gorszą o ``COMEBACK_CP`` (białe: ``<= -200``, czarne: ``>= 200``).
+    ``comeback_held`` to wersja ostrzejsza: taka ocena trwała przez co najmniej
+    ``COMEBACK_HOLD_EVALS`` kolejnych ocen liczbowych.
     """
     reason, plies, _parsed = _checked(game)
     if reason:
@@ -142,11 +155,13 @@ def comeback_job(game: RawGame) -> JobResult:
     evals = [ply.eval_cp for ply in plies if ply.eval_cp is not None]
     if not evals:
         return JobResult(reject=REJECT_NO_EVAL)
-    if result == "1-0":
-        comeback = int(any(cp <= -COMEBACK_CP for cp in evals))
-    else:
-        comeback = int(any(cp >= COMEBACK_CP for cp in evals))
-    return JobResult(records=((tempo_of(game.headers), (1, comeback)),))
+    # Oceny są z perspektywy białych. Dla wygranej czarnych odwracamy znak,
+    # żeby zawsze sprawdzać "zwycięzca był gorszy o 2 piony".
+    sign = 1 if result == "1-0" else -1
+    worse = [sign * cp <= -COMEBACK_CP for cp in evals]
+    comeback = int(any(worse))
+    held = int(_longest_run(worse) >= COMEBACK_HOLD_EVALS)
+    return JobResult(records=((tempo_of(game.headers), (1, comeback, held)),))
 
 
 def think_job(game: RawGame) -> JobResult:

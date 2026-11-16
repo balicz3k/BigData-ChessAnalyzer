@@ -36,7 +36,7 @@ def test_mapper_emituje_rekord_i_licznik(capsys):
     lines = [f"{index}\t{line}" for index, line in enumerate(PGN.splitlines(keepends=True))]
     assert map_games(lines, comeback_job) == 0
     captured = capsys.readouterr()
-    assert captured.out.strip() == "bullet\t1,1"
+    assert captured.out.strip() == "bullet\t1,1,0"
     assert "reporter:counter:chess,games,1" in captured.err
 
 
@@ -70,7 +70,7 @@ def test_skrypt_mappera_comeback():
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "bullet\t1,1"
+    assert proc.stdout.strip() == "bullet\t1,1,0"
     assert "reporter:counter:chess,games,1" in proc.stderr
 
 
@@ -78,12 +78,11 @@ def test_sumy_zgodne_z_parserem(tmp_path):
     pgn = tmp_path / "gry.pgn"
     pgn.write_text(PGN, encoding="utf-8")
     local = totals_for_path(pgn, comeback_job)
-    assert local == {"bullet": (1, 1)}
+    assert local == {"bullet": (1, 1, 0)}
     tsv = tmp_path / "comeback.tsv"
-    tsv.write_text("bullet\t1,1\n", encoding="utf-8")
+    tsv.write_text("bullet\t1,1,0\n", encoding="utf-8")
     assert compare_job(pgn, "comeback_by_tc", tsv) == []
-    tsv.write_text("bullet\t1,0\n", encoding="utf-8")
-    diffs = diff_totals(local, totals_from_rows([("bullet", (1, 0))]))
+    diffs = diff_totals(local, totals_from_rows([("bullet", (1, 0, 0))]))
     assert diffs
     assert "bullet" in diffs[0]
 
