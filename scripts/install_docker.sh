@@ -35,4 +35,4 @@ docker run --rm hello-world | head -3
 
 echo
 echo "GOTOWE. Użytkownik $TARGET_USER jest w grupie docker, ale grupa zadziała dopiero po"
-echo "WYLOGOWANIU I ZALOGOWANIU (albo restarcie komputera). Potem zrestartuj Cursora."
+echo "WYLOGOWANIU I ZALOGOWANIU (albo restarcie komputera). Potem otwórz terminal od nowa."

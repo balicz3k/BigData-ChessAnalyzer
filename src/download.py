@@ -119,7 +119,7 @@ def assert_game_file(path: Path) -> None:
 
 
 def parser_game_count(path: Path, limit: int | None = None) -> int:
-    """Ile partii wczyta parser z etapu 1. ``limit`` przerywa po tylu partiach."""
+    """Ile partii wczyta parser (src/pgn.py). ``limit`` przerywa po tylu partiach."""
     count = 0
     with path.open(encoding="utf-8", errors="replace") as fh:
         for _game in iter_games(fh):
@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     limit = 1 if args.full else None
     games = parser_game_count(dest, limit=limit)
     if games < 1:
-        print("BŁĄD: parser z etapu 1 nie wczytał żadnej partii", file=sys.stderr)
+        print("BŁĄD: parser nie wczytał żadnej partii", file=sys.stderr)
         return 1
     counted = "początek pliku, 1 partia" if args.full else f"{games} partii"
     print(f"zapisano {dest} ({nbytes} bajtów); parser wczytał {counted}")

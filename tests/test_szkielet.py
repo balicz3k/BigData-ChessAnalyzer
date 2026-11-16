@@ -1,4 +1,4 @@
-"""Etap 0: szkielet repozytorium. Pilnuje, żeby sekrety i dane nie trafiły do gita."""
+"""Szkielet repozytorium: sekrety i dane nie mogą trafić do gita."""
 
 from __future__ import annotations
 
