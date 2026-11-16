@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections import Counter
 from collections.abc import Iterable, Iterator
 
 from src.pgn import iter_games
@@ -24,21 +25,28 @@ def emit_counter(name: str, amount: int = 1) -> None:
 
 
 def emit_record(key: str, nums: tuple[int, ...]) -> None:
-    print(f"{key}\t{','.join(str(num) for num in nums)}", flush=True)
+    print(f"{key}\t{','.join(str(num) for num in nums)}")
 
 
 def map_games(lines: Iterable[str], job) -> int:
-    """Czyta partie ze stdin mappera i emituje rekordy oraz liczniki odrzuceń."""
+    """Czyta partie ze stdin mappera i emituje rekordy oraz liczniki odrzuceń.
+
+    Liczniki sumujemy w pamięci i wysyłamy do Hadoopa raz, na końcu mappera.
+    Wcześniej szła jedna linia na stderr na każdą partię, co spowalniało job.
+    """
+    counters: Counter[str] = Counter()
     for game in iter_games(hadoop_lines(lines)):
-        emit_counter("games")
+        counters["games"] += 1
         result = job(game)
         if result.reject:
-            emit_counter(result.reject)
-        for name, amount in result.counters.items():
-            if amount:
-                emit_counter(name, amount)
+            counters[result.reject] += 1
+        counters.update(result.counters)
         for key, nums in result.records:
             emit_record(key, nums)
+    sys.stdout.flush()
+    for name, amount in sorted(counters.items()):
+        if amount:
+            emit_counter(name, amount)
     return 0
 
 
