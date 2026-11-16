@@ -1,157 +1,217 @@
-# Dowody spełnienia wymagań (stan żywy po restarcie PC)
+# Dowody spełnienia wymagań
 
-Zebrano: 2026-11-04, godz. 19:14–19:25 (czas lokalny PC; logi Dockera w UTC, czyli o godzinę wcześniej). PC po restarcie (uptime ok. 2 min na początku), `partie-mongo` i `partie-hadoop` w stanie healthy. Katalog projektu: `~/Documents/master-studies/BigData/ChessAnalyzer/`. Sekrety (hasła, URI) nie są nigdzie wypisane; w poleceniach poniżej URI-e są czytane z `.env` wewnątrz skryptów.
+Zebrano 16.11.2026 (przebieg od zera 19:21–19:27, czas lokalny; HDFS podaje czasy w UTC, o godzinę wcześniej) na PC (Kubuntu, 16 rdzeni, 32 GB RAM), katalog `~/Documents/master-studies/BigData/ChessAnalyzer/`, kontenery `partie-hadoop` i `partie-mongo` w stanie healthy. Pełny przebieg od zera: `./run_all.sh --od-zera`, log w repozytorium: `wyniki/logi/run_all_full.log`. Hasła i adresy baz nie są nigdzie wypisywane.
 
-Podsumowanie: wszystkie 9 punktów OK, z jedną uwagą przy punkcie 9 (patrz niżej).
+## Tabela wymagań
+
+Wymagania z `Zasady_zaliczenia_projekt1.pdf`; wyższy próg obejmuje niższe. Numer w ostatniej kolumnie odsyła do sekcji niżej.
+
+| Próg | Wymaganie | Jak spełnione | Dowód |
+|---|---|---|---|
+| 3.0 | Problem i udokumentowane źródło danych | Lichess Open Database, wrzesień 2026, CC0; trzy pytania w README | 1 |
+| 3.0 | Min. 5 GB danych po wypakowaniu | 5 500 001 981 B PGN, 2 362 417 partii | 1 |
+| 3.0 | Aplikacja importująca dane do lokalnej MongoDB | `load_aggregates.py` (agregaty), `hdfs_io.py` / `split_pgn.py` (metadane importu) | 6 |
+| 3.0 | Sprawdzanie i czyszczenie danych | odrzucenia z licznikami Hadoopa (wynik, Elo, tempo, brak ocen) | 4 |
+| 3.0 | Co najmniej trzy sensowne analizy statystyczne | `blunder_in_trouble`, `comeback_by_tc`, `think_vs_cpl` | 4, 9 |
+| 3.0 | Wizualizacja / zestawienia | `plots/*.png`, tabele w sprawozdaniu | 9 |
+| 3.0 | Kod, dane lub instrukcja pobrania, sprawozdanie na Delcie | `do_oddania/` | 10 |
+| 4.0 | Dwie bazy: lokalna + darmowa chmura MongoDB | MongoDB 7 w Dockerze + Atlas M0, w obu `aggregates` | 6 |
+| 4.0 | Ponowny import bez niekontrolowanego powielania | upsert po unikalnym `(analysis, key)`; 0 → 126 → 126 | 6 |
+| 4.0 | Dane do min. jednej bazy z web scrapingu | dodatek: ranking FIDE → lokalne `fide_top` | 7 |
+| 4.0 | Prezentacja, przepływ danych i wyniki | `prezentacja/prezentacja.pdf`, `docs/SCENARIUSZ_POKAZU.md` | 10 |
+| 5.0 | Główny zbiór w HDFS | `/user/chess/raw/lichess_2026-09/` (8 części, 5,1 GiB) | 2 |
+| 5.0 | Hadoop MapReduce / Streaming do analizy | 3 joby Streaming, 8 mapperów + 1 reducer | 3, 4 |
+| 5.0 | Wyniki / agregaty / metadane w MongoDB | `aggregates` (obie bazy), `import_runs` (lokalnie) | 6 |
+| 5.0 | Szyfrowane połączenie i uwierzytelnienie | TLS z własnym CA + SCRAM lokalnie, `mongodb+srv` w Atlasie | 5 |
+| 5.0 | Prosta wizualizacja statystyk | `src/charts.py` → `plots/` | 9 |
+| 5.0 | Prezentacja działania, Hadoopa i wyników | slajdy 4–5 (HDFS, Streaming, czasy), demo `run_all.sh --probka` | 10 |
+| – | Poprawność obliczeń | sumy Hadoop = lokalny parser (próbka); 1 mapper = 8 mapperów (pełne dane) | 8 |
 
 ---
 
-## 1. Dane (plik PGN)
-
-Polecenia (2026-11-04 19:14):
+## 1. Dane (3.0)
 
 ```
-ls -l data/lichess_2026-09.pgn
-du -h data/lichess_2026-09.pgn
-```
-
-Wynik:
-
-```
+$ ls -l data/lichess_2026-09.pgn
 -rw-rw-r-- 1 balicz3k balicz3k 5500001981 Nov  3 22:54 data/lichess_2026-09.pgn
-5,2G	data/lichess_2026-09.pgn
 ```
 
-5 500 001 981 B (5,12 GiB, `du -h` zaokrągla w górę do 5,2G). Liczba partii nie była liczona od nowa. Bierzemy ją z licznika `chess.games` z historii jobów Hadoop (punkt 3): **2 362 417 partii**, 47 269 027 linii wejścia (`Map input records`). Źródło: Lichess Open Database, wrzesień 2026, CC0; SHA-256 pliku jest w lokalnej kolekcji `import_runs` (pipeline `hdfs_pgn`).
-
-## 2. HDFS po restarcie
-
-Polecenia (2026-11-04 19:14):
+5 500 001 981 B (5,12 GiB) nieskompresowanego PGN, źródło `https://database.lichess.org/standard/lichess_db_standard_rated_2026-09.pgn.zst` (CC0). Liczba partii z licznika Hadoopa `games`: **2 362 417**, linii (`Map input records`): 47 269 027. Ponowne uruchomienie nie pobiera pliku drugi raz (krok 3 w `run_all.sh`):
 
 ```
-docker exec partie-hadoop hdfs dfs -ls -h /user/chess/raw /user/chess/out /user/chess/out/full
-docker exec partie-hadoop hdfs fsck /user/chess/raw/lichess_2026-09.pgn
+pomijam pobieranie, lichess_2026-09.pgn ma 5500001981 bajtów (próg FULL_MIN_BYTES = 5500000000)
 ```
 
-Wynik (skrót): dane **przetrwały restart**.
+SHA-256 pliku jest w lokalnej kolekcji `import_runs` (pipeline `hdfs_pgn`): `3d3a647a…71c47`.
+
+## 2. HDFS (5.0)
 
 ```
--rw-r--r--  1 root supergroup  5.1 G  2026-11-03 22:43 /user/chess/raw/lichess_2026-09.pgn
--rw-r--r--  1 root supergroup 47.7 M  2026-11-03 21:39 /user/chess/raw/lichess_2026-09.sample.pgn
--rw-r--r--  1 root supergroup  1.2 K  2026-10-29 02:54 /user/chess/raw/smoke.pgn
-drwxr-xr-x  /user/chess/out/{debug2,full,sample,smoke,test_debug}
-drwxr-xr-x  /user/chess/out/full/blunder_in_trouble   (22:53, _SUCCESS, part-00000 1.4 K)
-drwxr-xr-x  /user/chess/out/full/comeback_by_tc       (23:03, _SUCCESS, part-00000 98 B)
-drwxr-xr-x  /user/chess/out/full/think_vs_cpl         (23:14, _SUCCESS, part-00000 2.2 K)
-hdfs dfs -du -h /user/chess  ->  5.2 G  /user/chess/raw
-fsck: The filesystem under path '/user/chess/raw/lichess_2026-09.pgn' is HEALTHY
+$ docker exec partie-hadoop hdfs dfs -ls -h /user/chess/raw/lichess_2026-09
+Found 8 items
+-rw-r--r--   1 root supergroup    655.7 M 2026-11-16 17:36 /user/chess/raw/lichess_2026-09/part-000.pgn
+...
+-rw-r--r--   1 root supergroup    655.6 M 2026-11-16 17:37 /user/chess/raw/lichess_2026-09/part-007.pgn
+
+$ docker exec partie-hadoop hdfs dfs -du -s -h /user/chess/raw/lichess_2026-09
+5.1 G  5.1 G  /user/chess/raw/lichess_2026-09
+
+$ docker exec partie-hadoop hdfs fsck /user/chess/raw/lichess_2026-09
+ Total size:    5500001981 B
+ Total files:   8
+ Total blocks (validated):  48 (avg. block size 114583374 B)
+The filesystem under path '/user/chess/raw/lichess_2026-09' is HEALTHY
 ```
 
-Dodatkowo: sumy kontrolne MD5 plików `part-00000` w HDFS i w `data/out/full/*/` są identyczne (blunder 5cffa327, comeback 851de058, think 139ba268).
-
-## 3. Joby Hadoop (pełne dane 5,5 GB): mappery, reducery, splity
-
-Źródło: historia jobów zapisana w HDFS (`/tmp/hadoop-yarn/staging/history/done_intermediate/root/*.jhist`), odczyt przez `mapred job -history all <plik.jhist>` (2026-11-04 19:19). Uwaga: po restarcie `yarn application -list -appStates ALL` jest puste (stan ResourceManagera jest w pamięci), więc ślad jobów istnieje tylko w historii w HDFS.
-
-| Job | ID | Mapperów | Reducerów | Splitów | Czas (Submitted → Finished) | Reduce output |
-|---|---|---|---|---|---|---|
-| blunder_in_trouble | job_1793727633376_0008 | 1 | 1 | 1 | 22:43:25 → 22:53:41 = **10 min 13 s** | 49 wierszy |
-| comeback_by_tc | job_1793727633376_0009 | 1 | 1 | 1 | 22:53:46 → 23:03:20 = **9 min 29 s** | 5 wierszy |
-| think_vs_cpl | job_1793727633376_0010 | 1 | 1 | 1 | 23:03:25 → 23:14:06 = **10 min 35 s** | 72 wierszy |
-
-Razem ok. **30 min 17 s** (od 22:43:25 do 23:14:06), 126 wierszy wyniku (49 + 5 + 72) = 126 dokumentów w Atlasie. Liczba splitów wynika z `mapreduce.input.fileinputformat.split.minsize=2000000000000` w `mr/run_jobs.sh` oraz liczników: `Launched map tasks = 1`, `Input split bytes = 105`, `Data-local map tasks = 1`; `HDFS: bytes read` = 5 500 002 086.
-
-Liczniki (każdy job): `games` = 2 362 417; `result` = 220; `timecontrol` = 2 260. Specyficzne: blunder `no_qualifying` = 2 118 187; comeback `no_eval` = 2 036 761, `not_decisive` = 89 422; think `no_qualifying` = 2 118 187, `negative_think` = 53 315. Map output records: blunder 345 571.
-
-Dla porównania, przebieg na próbce 47,7 MB (21 248 partii, 425 265 linii): po ok. 12–13 s na job (jobs 0005–0007), 1 mapper + 1 reducer.
-
-## 4. Lokalna MongoDB: TLS + SCRAM
-
-Polecenia (2026-11-04 19:20): `.venv/bin/python scripts/check_mongo_tls.py` oraz skrypt pomocniczy w `/tmp` (poza repozytorium) używający `src.mongo_io.local_client()`.
+Części powstały w `src/split_pgn.py` (cięcie tylko przed `[Event "`); suma rozmiarów równa się dokładnie rozmiarowi pliku źródłowego. Drugie uruchomienie niczego nie wysyła:
 
 ```
-OK: TLS z weryfikacją certyfikatu (CA: ca.pem), uwierzytelniony jako: admin
-baza: chess, kolekcje: ['fide_top', 'import_runs']
-  fide_top: 1202        (indeksy: _id_, list_period_rank - unikalny)
-  import_runs: 3        (pipeline: hdfs_pgn, fide_scrape, aggregates)
+części już są: 8 plików w .../data/parts
+HDFS bez zmian: /user/chess/raw/lichess_2026-09 ma 8 części, rozmiary zgodne
 ```
 
-Dowody szyfrowania i uwierzytelnienia (ten sam URI, różne parametry klienta):
+## 3. Hadoop Streaming: mappery, reducery, czasy (5.0)
 
-| Próba | Wynik |
-|---|---|
-| Bez TLS (`tls=False`) | NIE POŁĄCZONO: `ServerSelectionTimeoutError: localhost:27017: connection closed` |
-| TLS, ale bez pliku CA (store systemowy) | NIE POŁĄCZONO: `[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain` |
-| TLS + CA, bez hasła | POŁĄCZENIE jest, odczyt odrzucony: `OperationFailure: Command aggregate requires authentication (code 13, Unauthorized)` |
-| TLS + CA + SCRAM (URI z `.env`) | OK, `ping` = 1 (mechanizm negocjowany, `DEFAULT`, dla Mongo 7 to SCRAM-SHA-256) |
-
-Walidacja CA włączona: `LOCAL_MONGO_URI` nie zawiera `tlsAllowInvalidCertificates` (sprawdzone programowo: False), `src/mongo_io.py` odrzuca taki URI (`_reject_insecure`), klient zawsze dostaje `tls=True, tlsCAFile=certs/ca.pem`. Serwer: `docker inspect partie-mongo` pokazuje argumenty `--auth --tlsMode requireTLS --tlsCertificateKeyFile ... --tlsCAFile ... --tlsAllowConnectionsWithoutCertificates` (ta ostatnia flaga dotyczy braku certyfikatu klienta, nie wyłącza weryfikacji certyfikatu serwera przez klienta). Port 27017 wystawiony tylko na `127.0.0.1`.
-
-## 5. Atlas
-
-Polecenie (2026-11-04 19:20): skrypt pomocniczy z `src.mongo_io.atlas_client()`; w wyniku tylko liczby.
+Polecenie (krok 5 w `run_all.sh`): `docker exec partie-hadoop bash /opt/projekt/mr/run_jobs.sh /user/chess/raw/lichess_2026-09 /user/chess/out/full`. Fragmenty z `wyniki/logi/run_all_full.log`:
 
 ```
-ping: {'ok': 1}
-baza: chess, kolekcje: ['aggregates']
-  aggregates: 126      (blunder_in_trouble 49, comeback_by_tc 5, think_vs_cpl 72)
-indeksy: _id_, analysis_key (unikalny na (analysis, key))
-URI: schemat mongodb+srv, TLS włączony po stronie klienta, brak tlsAllowInvalidCertificates
+Start jobu blunder_in_trouble
+        HDFS: Number of bytes read=5500002893
+        Launched map tasks=8
+        Launched reduce tasks=1
+        Map input records=47269027
+        Reduce output records=49
+Koniec jobu blunder_in_trouble -> /user/chess/out/full/blunder_in_trouble (105 s)
+Koniec jobu comeback_by_tc -> /user/chess/out/full/comeback_by_tc (103 s)      [Reduce output records=5]
+Koniec jobu think_vs_cpl -> /user/chess/out/full/think_vs_cpl (116 s)          [Reduce output records=72]
 ```
 
-Atlas ma tylko kolekcję `aggregates`; metadane importu (`import_runs`) i ranking FIDE są lokalnie, zgodnie z projektem.
+Porównanie z jednym mapperem (ten sam kod, wejście = jeden plik `/user/chess/raw/lichess_2026-09.pgn`, logi `wyniki/logi/pomiar_1_mapper.log` i `pomiar_8_mapperow.log`):
 
-## 6. Scraping FIDE (idempotencja)
+| Job | 1 plik, 1 mapper | 8 części, 8 mapperów |
+|---|---|---|
+| `blunder_in_trouble` | 647 s | 105 s |
+| `comeback_by_tc` | 598 s | 103 s |
+| `think_vs_cpl` | 658 s | 116 s |
+| razem | 31 min 43 s | 5 min 24 s (ok. 5,9×) |
 
-Polecenie (2026-11-04 19:20:46): `.venv/bin/python -m src.scrape_fide` (źródło: https://ratings.fide.com/, 12 list Top: open, women, juniors, girls oraz ich blitz/rapid; upsert po `(list, period, rank)`).
+Źródło: `wyniki/jeden_mapper/czasy.tsv` i `wyniki/full/czasy.tsv`. Na PC w tym czasie działał też trening sieci (UM), więc czasy są orientacyjne.
 
-```
-przed:  fide_top = 1202, import_runs = 3
-uruchomienie: "fide_top count=1202", czas 15 s
-po:     fide_top = 1202, import_runs = 3
-```
+## 4. Czyszczenie danych i trzy analizy (3.0)
 
-Liczba dokumentów bez zmian: 1202 przed i po. Scraper w tym przebiegu pobrał dane na żywo (strona dostępna).
+Liczniki Hadoopa z tego samego logu (grupa `chess`):
 
-## 7. Powtarzalny import agregatów
-
-Polecenie (2026-11-04 19:21), dwa kolejne przebiegi:
-
-```
-.venv/bin/python -m src.load_aggregates \
-  --blunder data/out/full/blunder_in_trouble/part-00000 \
-  --comeback data/out/full/comeback_by_tc/part-00000 \
-  --think data/out/full/think_vs_cpl/part-00000
-```
-
-| Moment | Atlas `aggregates` | Lokalnie `fide_top` | Lokalnie `import_runs` |
+| Licznik | `blunder_in_trouble` | `comeback_by_tc` | `think_vs_cpl` |
 |---|---|---|---|
-| przed | 126 | 1202 | 3 |
-| po przebiegu 1 | 126 | 1202 | 3 |
-| po przebiegu 2 | 126 | 1202 | 3 |
+| `games` (wszystkie partie) | 2 362 417 | 2 362 417 | 2 362 417 |
+| `result` (zły wynik) | 220 | 220 | 220 |
+| `timecontrol` (brak tempa) | 2 260 | 2 260 | 2 260 |
+| `no_qualifying` (brak ruchu z oceną i zegarem) | 2 118 187 | – | 2 118 187 |
+| `no_eval` (partia bez oceny) | – | 2 036 761 | – |
+| `not_decisive` (remis) | – | 89 422 | – |
+| `negative_think` (ruchy z ujemnym czasem) | – | – | 53 315 |
 
-Wyjście obu przebiegów: `aggregates count=126 (source_month=2026-09)`. Zapis to wyłącznie upsert (`update_one(..., upsert=True)` po unikalnym `(analysis, key)`), nic nie usuwano. Skutek uboczny z założenia: odświeża się pole `updated_at` w 126 dokumentach oraz `finished_at` w dokumencie `import_runs` (pipeline `aggregates`).
-
-## 8. Testy
-
-Polecenie (2026-11-04 19:21): `.venv/bin/python -m pytest -q`
-
-```
-217 passed in 1.03s
-```
-
-## 9. Sekrety w repozytorium
-
-Polecenia (2026-11-04 19:22):
+Wyniki (126 wierszy) są w `wyniki/full/*.tsv`, np. `comeback_by_tc.tsv` (`n, comeback, comeback_held`):
 
 ```
-git ls-files | grep -i env
-git grep -n -I -E 'mongodb\+srv://[^"\s]*:[^@"\s]+@'
+blitz	104385,49312,22491
+bullet	49770,27708,14687
+classical	4394,1776,778
+rapid	73355,33670,15209
+ultrabullet	1850,1429,909
 ```
 
-- `git ls-files | grep -i env` zwraca `.env.example` (szablon bez wartości) i `docker/hadoop.env` (konfiguracja Hadoopa; w pliku brak słów pass/secret/token). Prawdziwy `.env` NIE jest śledzony (`.gitignore:2`), `certs/ca.key` i `certs/*` poza gitem, `REVIEW.md` zignorowany.
-- `git grep` na URI z hasłem: **brak trafień** (kod wyjścia 1).
-- Dodatkowo cała historia (`git log --all -p -G...`): brak dodanych linii z URI z hasłem; w historii nie ma plików `.env`, `.pem`, `.key`, `.pgn` poza fixturami `tests/fixtures/*.pgn` (małe pliki testowe).
-- Uwaga (niekrytyczna): `git status` pokazuje niezacommitowane zmiany w `README.md` i `sprawozdanie.md`. Nie commitowano niczego.
+## 5. Szyfrowanie i uwierzytelnienie (5.0)
 
-Brak znalezisk KRYTYCZNYCH.
+```
+$ .venv/bin/python scripts/check_mongo_tls.py
+OK: TLS z weryfikacją certyfikatu (CA: ca.pem), uwierzytelniony jako: admin
+
+$ .venv/bin/python scripts/proby_tls.py
+1. bez TLS                   ODMOWA: ServerSelectionTimeoutError: localhost:27017: connection closed
+2. TLS bez naszego CA        ODMOWA: ServerSelectionTimeoutError: localhost:27017: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain (_ssl.c:1081)
+3. TLS + CA, bez hasła       ODMOWA: OperationFailure: Command aggregate requires authentication
+4. TLS + CA + hasło (SCRAM)  OK, aggregates: 126 dokumentów
+
+$ docker inspect partie-mongo --format '{{json .Args}}'
+["mongod","--auth","--bind_ip_all","--tlsMode","requireTLS","--tlsCertificateKeyFile","/certs/server.pem","--tlsCAFile","/certs/ca.pem","--tlsAllowConnectionsWithoutCertificates"]
+```
+
+`--tlsAllowConnectionsWithoutCertificates` oznacza tylko, że klient nie musi mieć własnego certyfikatu; klient zawsze weryfikuje certyfikat serwera plikiem CA, a adres z `tlsAllowInvalidCertificates` jest odrzucany w `src/mongo_io.py`. Port 27017 jest wystawiony tylko na `127.0.0.1`. Atlas: adres `mongodb+srv://` (TLS domyślnie), lista dozwolonych IP.
+
+## 6. Dwie bazy, import i brak powielania (3.0, 4.0, 5.0)
+
+Krok 7 w `run_all.sh --od-zera` (`src/verify_idempotent.py`): usuwa kolekcję, importuje dwa razy, liczy dokumenty.
+
+```
+usunięto kolekcje aggregates w obu bazach
+aggregates przed importem:  {'lokalna': 0, 'atlas': 0}
+aggregates po 1. imporcie:  {'lokalna': 126, 'atlas': 126}
+aggregates po 2. imporcie:  {'lokalna': 126, 'atlas': 126}
+OK: drugi import nie zwiększył liczby dokumentów
+```
+
+Stan baz po przebiegu (`.venv/bin/python -m src.summary`, skrót):
+
+```
+MongoDB lokalna (TLS + SCRAM): baza chess
+  aggregates: 126 dokumentów          (blunder_in_trouble 49, comeback_by_tc 5, think_vs_cpl 72)
+  aggregates_probka: 106 dokumentów   (wyniki z run_all.sh --probka)
+  fide_top: 1202 dokumentów
+  import_runs: 6 dokumentów
+MongoDB Atlas (mongodb+srv): baza chess
+  aggregates: 126 dokumentów          (49 / 5 / 72)
+  aggregates_probka: 106 dokumentów
+import_runs (metadane importów, lokalnie):
+  aggregates: documents_local 126, documents_atlas 126, hdfs_path /user/chess/raw/lichess_2026-09
+  hdfs_pgn_parts: bytes 5500001981, files 8, hdfs_path /user/chess/raw/lichess_2026-09
+  hdfs_pgn: bytes 5500001981, sha256 3d3a647a…, hdfs_path /user/chess/raw/lichess_2026-09.pgn
+  fide_scrape: count 1202, 12 list
+```
+
+Mechanizm: unikalny indeks `analysis_key` na `(analysis, key)` i `update_one(..., {"$set": ...}, upsert=True)`. Próbka idzie do osobnej kolekcji `aggregates_probka`, więc nie nadpisuje wyników z pełnych danych (tam też 0 → 106 → 106).
+
+## 7. Web scraping – dodatek (4.0)
+
+Krok 8 w `run_all.sh` (`python -m src.scrape_fide`, ratings.fide.com, 12 list Top, BeautifulSoup, upsert po `(list, period, rank)`):
+
+```
+fide_top count=1202
+```
+
+Liczba dokumentów przed i po przebiegu jest ta sama (1202), bo zapis jest upsertem. Dane FIDE trafiają tylko do lokalnej bazy i nie są łączone z partiami Lichess.
+
+## 8. Poprawność obliczeń
+
+- Próbka 50 MB, krok 6a w `run_all.sh --probka` (`wyniki/logi/run_all_probka.log`):
+  ```
+  sumy jobu blunder_in_trouble są zgodne z lokalnym parserem
+  sumy jobu comeback_by_tc są zgodne z lokalnym parserem
+  sumy jobu think_vs_cpl są zgodne z lokalnym parserem
+  ```
+- Pełne dane: wyniki z 1 mappera (`wyniki/jeden_mapper/`) i z 8 mapperów (`wyniki/full/`) są identyczne bajt w bajt (`cmp` dla trzech plików TSV) – podział na części nie zgubił ani nie zdublował żadnej partii.
+- Testy: `181 passed` (krok 1 w obu przebiegach).
+
+## 9. Wizualizacja (3.0, 5.0)
+
+Krok 9: `python -m src.charts --out plots ...` → `plots/blunder.png`, `plots/comeback.png`, `plots/namysl.png`. Te same rysunki w PDF i tabele w sprawozdaniu generuje `sprawozdanie_latex/generuj.py` z plików w `wyniki/`.
+
+## 10. Materiały do oddania i prezentacja (3.0, 4.0, 5.0)
+
+- `do_oddania/`: zip z kodem (z `git archive`; skrypt `scripts/paczka_do_oddania.sh` sprawdza, że nie ma w nim `.env`, kluczy, certyfikatów ani danych PGN poza małymi fixturami testów), sprawozdanie PDF, prezentacja PDF, `INSTRUKCJA_DANYCH.md`.
+- Prezentacja: `prezentacja/prezentacja.pdf` (12 slajdów), przebieg pokazu: `docs/SCENARIUSZ_POKAZU.md`.
+
+## 11. Sekrety w repozytorium
+
+```
+$ git ls-files | grep -i -E "env|pem|key|pgn|zst"
+.env.example            (szablon z pustymi wartościami)
+docker/hadoop.env       (konfiguracja Hadoopa, bez haseł)
+src/pgn.py, src/split_pgn.py, tests/test_pgn.py
+tests/fixtures/*.pgn    (5 małych partii testowych)
+
+$ git grep -n -I -E 'mongodb\+srv://[^"[:space:]]*:[^@"[:space:]]+@'
+(brak trafień, kod wyjścia 1)
+```
+
+Prawdziwy `.env` i `certs/` są poza gitem.
