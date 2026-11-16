@@ -1,4 +1,4 @@
-"""Etap 1: parser PGN, czyszczenie, tempo, kubełki Elo oraz joby długości i zegara.
+"""Parser PGN, czyszczenie nagłówków, tempo i kubełki Elo.
 
 Definicje pochodzą z docs/DANE-I-ANALIZY.md.
 """
@@ -10,17 +10,14 @@ import pytest
 from src import pgn
 from src.pgn import (
     REJECT_ELO,
-    REJECT_NO_CLK,
     REJECT_RESULT,
     REJECT_TIMECONTROL,
     Ply,
-    clock_job,
     elo_bucket,
     header_reject_reason,
     iter_games,
     parse_movetext,
     parse_time_control,
-    ply_job,
     tempo_class,
     tempo_of,
 )
@@ -206,7 +203,7 @@ def test_zle_tempo_odrzuca(tc):
 
 
 def test_kazdy_powod_odrzucenia_ma_inna_nazwe():
-    assert len({REJECT_RESULT, REJECT_ELO, REJECT_TIMECONTROL, REJECT_NO_CLK, pgn.REJECT_FEW_EVALS}) == 5
+    assert len({REJECT_RESULT, REJECT_ELO, REJECT_TIMECONTROL}) == 3
 
 
 # --- tempo --------------------------------------------------------------------------
@@ -261,122 +258,3 @@ def test_kubelki_elo(elo, key):
 
 def test_kubelek_ze_sredniej_nie_zaokragla_w_gore():
     assert elo_bucket((1199 + 1200) / 2) == "u1200"
-
-
-# --- job ply_by_tc_elo ---------------------------------------------------------------
-
-
-def test_job_dlugosci_na_fixturze_z_zegarem(one_fixture):
-    result = ply_job(one_fixture("clk_game.pgn"))  # 180+2 -> blitz, srednie Elo 1600
-    assert result.reject is None
-    assert result.records == (("blitz|1600", (1, 10)),)
-
-
-def test_job_dlugosci_na_fixturze_bez_eval(one_fixture):
-    result = ply_job(one_fixture("no_eval.pgn"))  # 900+10 -> 1300 s = rapid, srednie Elo 1805
-    assert result.records == (("rapid|1600", (1, 8)),)
-
-
-def test_job_dlugosci_liczy_polruchy_a_nie_ruchy(make_game):
-    game = make_game([("e4", None, None), ("e5", None, None), ("Nf3", None, None)], result="1-0")
-    assert ply_job(game).records == (("blitz|1200", (1, 3)),)
-
-
-@pytest.mark.parametrize(
-    ("kwargs", "reason"),
-    [
-        ({"result": "*"}, REJECT_RESULT),
-        ({"white_elo": None}, REJECT_ELO),
-        ({"black_elo": "?"}, REJECT_ELO),
-        ({"time_control": "-"}, REJECT_TIMECONTROL),
-        ({"time_control": None}, REJECT_TIMECONTROL),
-    ],
-)
-def test_job_dlugosci_odrzuca_i_podaje_powod(make_game, kwargs, reason):
-    game = make_game([("e4", None, None), ("e5", None, None)], **kwargs)
-    result = ply_job(game)
-    assert result.records == ()
-    assert result.reject == reason
-
-
-def test_job_dlugosci_odrzuca_fixture_bez_elo(one_fixture):
-    assert ply_job(one_fixture("no_elo.pgn")).reject == REJECT_ELO
-
-
-# --- job time_trouble_by_tc ----------------------------------------------------------
-
-
-def test_job_zegara_na_fixturze(one_fixture):
-    """Białe zeszły do 8 s i przegrały; czarne najniżej 160 s i wygrały."""
-    result = clock_job(one_fixture("clk_game.pgn"))
-    assert result.reject is None
-    assert result.records == (
-        ("blitz|white", (1, 1, 1, 0)),  # n, trouble, trouble_loss, ok_loss
-        ("blitz|black", (1, 0, 0, 0)),
-    )
-
-
-def _clock_game(make_game, white_min, black_min, result):
-    plies = [
-        ("e4", 100, None), ("e5", 100, None),
-        ("Nf3", white_min, None), ("Nc6", black_min, None),
-    ]
-    return make_game(plies, result=result, time_control="600+0")
-
-
-def test_prog_czasowki_to_10_sekund_wlacznie(make_game):
-    rec = dict(clock_job(_clock_game(make_game, 10, 11, "1-0")).records)
-    assert rec["rapid|white"] == (1, 1, 0, 0)  # 10 s = czasówka, białe wygrały
-    assert rec["rapid|black"] == (1, 0, 0, 1)  # 11 s = brak czasówki, czarne przegrały
-
-
-def test_czasowka_i_porazka_czarnych(make_game):
-    rec = dict(clock_job(_clock_game(make_game, 50, 3, "1-0")).records)
-    assert rec["rapid|black"] == (1, 1, 1, 0)
-    assert rec["rapid|white"] == (1, 0, 0, 0)
-
-
-def test_remis_nie_jest_porazka_zadnej_strony(make_game):
-    rec = dict(clock_job(_clock_game(make_game, 5, 5, "1/2-1/2")).records)
-    assert rec["rapid|white"] == (1, 1, 0, 0)
-    assert rec["rapid|black"] == (1, 1, 0, 0)
-
-
-def test_czasowka_to_minimum_z_calej_partii_nie_z_konca(make_game):
-    plies = [("e4", 100, None), ("e5", 100, None), ("Nf3", 4, None), ("Nc6", 100, None), ("Nc3", 200, None)]
-    rec = dict(clock_job(make_game(plies, result="0-1", time_control="600+0")).records)
-    assert rec["rapid|white"] == (1, 1, 1, 0)  # zegar 4 s w środku, potem ponad 10 s
-
-
-def test_strony_wedlug_kolejnosci_polruchow(make_game):
-    """Nieparzysty półruch to białe, parzysty to czarne."""
-    plies = [("e4", 5, None), ("e5", 500, None), ("Nf3", 500, None), ("Nc6", 500, None)]
-    rec = dict(clock_job(make_game(plies, result="1-0", time_control="600+0")).records)
-    assert rec["rapid|white"][1] == 1
-    assert rec["rapid|black"][1] == 0
-
-
-def test_job_zegara_nie_miesza_tempa_w_kluczu(make_game):
-    plies = [("e4", 30, None), ("e5", 30, None)]
-    bullet = clock_job(make_game(plies, time_control="60+0"))
-    classical = clock_job(make_game(plies, time_control="1800+0"))
-    assert {k for k, _ in bullet.records} == {"bullet|white", "bullet|black"}
-    assert {k for k, _ in classical.records} == {"classical|white", "classical|black"}
-
-
-def test_job_zegara_odrzuca_partie_bez_clk(one_fixture):
-    result = clock_job(one_fixture("no_eval.pgn"))
-    assert result.records == ()
-    assert result.reject == REJECT_NO_CLK
-
-
-def test_job_zegara_stosuje_czyszczenie_naglowka(one_fixture):
-    assert clock_job(one_fixture("no_elo.pgn")).reject == REJECT_ELO
-
-
-def test_job_zegara_jedna_strona_z_zegarem(make_game):
-    """Partia z jednym półruchem: czarne nie mają zegara, ale wg specyfikacji dostają rekord."""
-    game = make_game([("e4", 5, None)], result="1-0", time_control="600+0")
-    rec = dict(clock_job(game).records)
-    assert rec["rapid|white"] == (1, 1, 0, 0)
-    assert rec["rapid|black"] == (1, 0, 0, 1)
