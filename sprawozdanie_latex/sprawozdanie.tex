@@ -58,24 +58,52 @@
        w Hadoop Streaming, HDFS i MongoDB\\[0.4em]
        \large Projekt 1 z przedmiotu Big Data}
 \author{Jakub Balicki}
-\date{2026-11}
+\date{listopad 2026}
 
 \begin{document}
 \maketitle
-\vspace{-1em}
+\tableofcontents
 
-\section{Cel i dane}
-Projekt sprawdza, jak czas na zegarze, tempo gry i poziom Elo wiążą się z jakością ruchów w partiach szachowych. Dane to Lichess Open Database (licencja CC0), wrzesień 2026: początek miesiąca, 5\,500\,001\,981 B po rozpakowaniu (niewielki początkowy wycinek pełnego miesiąca). Część partii ma zapisaną ocenę silnika (\kod{[\%eval]}, w centypionach) i stan zegara (\kod{[\%clk]}), więc jakość ruchu liczymy z tych adnotacji, bez własnego silnika. Wnioski dotyczą więc wyłącznie partii z oceną z tego wycinka. Partie z błędnym wynikiem, bez Elo lub z niepoprawnym \kod{TimeControl} są odrzucane. Tempo wynika z szacowanego czasu partii (baza + 40 $\cdot$ inkrement): ultrabullet $<30$ s, bullet $<180$ s, blitz $<480$ s, rapid $<1500$ s, classical powyżej. Elo dzielimy na pięć kubełków: $<1200$, 1200, 1600, 2000, 2400+.
-
-Trzy pytania, każde to osobny job MapReduce:
+\section{Problem}
+Projekt sprawdza, jak czas na zegarze, tempo gry i ranking wiążą się z jakością ruchów w partiach szachowych rozgrywanych w internecie. Postawiłem trzy pytania, każde liczone osobnym jobem MapReduce:
 \begin{enumerate}
-\item \kod{blunder\_in\_trouble}: czy odsetek błędów rośnie, gdy na zegarze zostaje 10 s lub mniej?
-\item \kod{comeback\_by\_tc}: jaki udział rozstrzygniętych partii wygrał gracz, który kiedyś miał ocenę gorszą o co najmniej dwa piony?
-\item \kod{think\_vs\_cpl}: czy ruchy po dłuższym namyśle mają mniejszą średnią stratę?
+\item \kod{blunder\_in\_trouble}: czy gdy na zegarze zostaje 10 s lub mniej, gracze częściej popełniają poważne błędy?
+\item \kod{comeback\_by\_tc}: w jakiej części rozstrzygniętych partii wygrał gracz, który wcześniej przegrywał o co najmniej dwa piony, i czy zależy to od tempa?
+\item \kod{think\_vs\_cpl}: czy ruchy wykonane po dłuższym namyśle są lepsze (mniejsza strata centypionów)?
 \end{enumerate}
+Zbiór jest za duży, żeby wygodnie analizować go w pamięci jednym skryptem, więc główny przepływ jest oparty na HDFS i Hadoop Streaming, a do baz MongoDB trafiają tylko wyniki (agregaty) i metadane.
 
-\section{Architektura i pipeline}
-Archiwum jest pobierane strumieniowo, rozpakowywane w locie i ucinane na granicy partii, a następnie wgrywane do HDFS (z kontrolą SHA-256, żeby nie powtarzać importu). Trzy joby Hadoop Streaming (mappery i wspólny reducer w Pythonie) czytają surowy PGN i zapisują wyniki w HDFS. Agregaty trafiają do MongoDB Atlas, wykresy powstają z plików wynikowych, a lokalna instancja MongoDB (TLS, SCRAM) przechowuje ranking FIDE ze scrapingu oraz metadane importów. Całość działa w Dockerze (Hadoop 3.4.3, MongoDB 7.0.45).
+\section{Dane}
+\subsection{Źródło}
+Głównym źródłem jest Lichess Open Database (\url{https://database.lichess.org/}), licencja CC0. Użyłem pliku z partiami rankingowymi z września 2026 (\kod{lichess\_db\_standard\_rated\_\allowbreak 2026-09.pgn.zst}). Cały miesiąc to 29,2 GB po kompresji zstd i ok.\ 200 GB po rozpakowaniu, dlatego \kod{src/download.py} pobiera archiwum strumieniowo, rozpakowuje je w locie i przerywa pobieranie po pierwszej pełnej partii za progiem 5\,500\,000\,000 B. Wynik to plik \kod{lichess\_2026-09.pgn}: 5\,500\,001\,981 B (5,12 GiB), \nGames{} partii, \nMapInput{} linii. To początek miesiąca, a nie losowa próba.
+
+\subsection{Format PGN}
+Każda partia to blok nagłówków w nawiasach kwadratowych i zapis ruchów. Komentarze w klamrach zawierają stan zegara po ruchu (\kod{[\%clk]}) i, w części partii, ocenę silnika Stockfish wyliczoną przez Lichess (\kod{[\%eval]}):
+\begin{lstlisting}[style=plain]
+[Event "Rated Blitz game"]
+[Site "https://lichess.org/..."]
+[Result "0-1"]
+[WhiteElo "1500"]
+[BlackElo "1700"]
+[TimeControl "180+2"]
+[Termination "Time forfeit"]
+
+1. e4 { [%eval 0.17] [%clk 0:03:00] } 1... e5 { [%eval 0.19] [%clk 0:02:58] } ...
+\end{lstlisting}
+Z nagłówków używam pól \kod{Result}, \kod{WhiteElo}, \kod{BlackElo} i \kod{TimeControl} (czas bazowy w sekundach i inkrement, np.\ \kod{180+2}). Ocena \kod{[\%eval 0.17]} oznacza przewagę białych o 17 centypionów (zawsze z perspektywy białych), a \kod{[\%eval \#-4]} oznacza mata w 4 ruchach dla czarnych. Silnika nie uruchamiam: korzystam tylko z ocen zapisanych w pliku, które ma ok.\ 10\% partii z wycinka.
+
+\subsection{Sprawdzanie i czyszczenie}
+Wspólne dla wszystkich jobów (\kod{header\_reject\_reason} w \kod{src/pgn.py}): partia odpada, gdy wynik nie jest \kod{1-0}, \kod{0-1} ani \kod{1/2-1/2} (\nRejResult{} partii), gdy brakuje rankingu lub nie jest liczbą, albo gdy \kod{TimeControl} jest pusty lub równy \kod{-} (\nRejTimecontrol{} partii, głównie partie korespondencyjne). Każde odrzucenie jest zliczane licznikiem Hadoopa, więc wszystkie liczby w tym punkcie pochodzą z logu jobu.
+
+Dodatkowo każdy job pomija ruchy, których nie da się policzyć: bez pary ocen liczbowych (np.\ gdy któraś ocena to mat), bez zegara albo z ujemnym czasem namysłu (\nNegativeThink{} ruchów, licznik \kod{negative\_think}). Partie bez żadnego użytecznego ruchu odpadają z powodem \kod{no\_qualifying} (\nNoQualifying{} partii w \kod{blunder\_in\_trouble}). W \kod{comeback\_by\_tc} odpadają remisy (\nNotDecisive) i partie bez oceny (\nNoEval).
+
+Tempo liczę jak Lichess: czas bazowy + 40 $\cdot$ inkrement; ultrabullet $<30$ s, bullet $<180$ s, blitz $<480$ s, rapid $<1500$ s, classical powyżej. Ranking dzielę na pięć kubełków: $<1200$, 1200--1599, 1600--1999, 2000--2399, 2400+.
+
+\subsection{Dane dodatkowe (web scraping)}
+Jako moduł poboczny, ustalony z prowadzącą jako dodatek, projekt pobiera ranking FIDE ze strony \url{https://ratings.fide.com/} (12 list Top: open, kobiety, juniorzy, juniorki oraz ich wersje blitz i rapid). Dane trafiają tylko do lokalnej bazy (kolekcja \kod{fide\_top}) i nie są łączone z partiami z Lichess.
+
+\section{Architektura}
+Rysunek~\ref{fig:flow} pokazuje przepływ danych. Całość działa w dwóch kontenerach Docker na jednym komputerze (Kubuntu, 16 rdzeni, 32 GB RAM): \kod{apache/hadoop:3.4.3} (NameNode, DataNode, ResourceManager i NodeManager w jednym kontenerze) oraz \kod{mongo:7.0.45}. Druga baza to darmowy klaster MongoDB Atlas M0.
 
 \begin{figure}[H]
 \centering
@@ -92,46 +120,153 @@ Archiwum jest pobierane strumieniowo, rozpakowywane w locie i ucinane na granicy
 ]
 \node[box]  (zst)  at (0,0)     {archiwum Lichess\\\texttt{.pgn.zst}};
 \node[box]  (dl)   at (3.7,0)   {\texttt{download.py}\\\texttt{.zst}\,$\to$\,\texttt{.pgn}\\(5,5 GB)};
-\node[hbox] (raw)  at (7.4,0)   {HDFS\\\texttt{/user/chess/raw/}\\\texttt{lichess\_2026-09}\\\texttt{.pgn}};
-\node[hbox] (mr)   at (11.1,0)  {Hadoop Streaming\\mapper $\to$ shuffle $\to$ reducer};
-\node[hbox] (out)  at (14.8,0)  {HDFS\\\texttt{/user/chess/out/}\\wyniki \texttt{part-00000}};
+\node[hbox] (raw)  at (7.4,0)   {HDFS\\\texttt{/user/chess/raw/}\\\texttt{lichess\_2026-09/}\\8 części};
+\node[hbox] (mr)   at (11.1,0)  {Hadoop Streaming\\8 mapperów $\to$ sortowanie $\to$ reducer};
+\node[hbox] (out)  at (14.8,0)  {HDFS\\\texttt{/user/chess/out/full/}\\\texttt{part-00000}};
 \draw[arr] (zst) -- (dl);
-\draw[arr] (dl) -- (raw) node[lab, pos=0.5]{\texttt{put}};
+\draw[arr] (dl) -- (raw) node[lab, pos=0.5]{\texttt{split\_pgn}};
 \draw[arr] (raw) -- (mr);
 \draw[arr] (mr) -- (out);
-\node[dbox] (atlas) at (7.4,-3.2)   {MongoDB Atlas (M0)\\\texttt{mongodb+srv://}\\\texttt{aggregates}};
 \node[box]  (load)  at (11.1,-3.2)  {\texttt{load\_aggregates.py}\\upsert \texttt{(analysis, key)}};
 \node[box]  (chart) at (14.8,-3.2)  {\texttt{charts.py}\\(matplotlib)};
-\node[dbox] (local) at (11.1,-6.4)  {MongoDB lokalna (Docker)\\TLS + SCRAM\\\texttt{fide\_top}, \texttt{import\_runs}};
-\node[fbox] (plots) at (14.8,-6.4)  {wykresy\\\texttt{plots/*.png}};
-\draw[arr] (out.south) -- (chart.north) node[lab, pos=0.5, right, above=0pt]{\texttt{hdfs get}};
+\node[dbox] (atlas) at (14.8,-6.4)   {MongoDB Atlas (M0)\\\texttt{mongodb+srv://}\\\texttt{aggregates}};
+\node[dbox] (local) at (7.4,-6.4)  {MongoDB lokalna (Docker)\\TLS + SCRAM\\\texttt{aggregates}, \texttt{import\_runs}, \texttt{fide\_top}};
+\node[fbox] (plots) at (14.8,-9.0)  {wykresy\\\texttt{plots/*.png}};
+\draw[arr] (out.south) -- (chart.north);
 \draw[arr] (out.south west) -- ++(0,-0.9) -| (load.north);
-\draw[arr] (load) -- (atlas) node[lab, pos=0.5]{agregaty};
-\draw[arr] (load) -- (local) node[lab, pos=0.5, right, above=0pt]{metadane};
-\draw[arr] (chart) -- (plots);
+\draw[arr] (load) -- (atlas) node[lab, pos=0.5, sloped]{agregaty};
+\draw[arr] (load) -- (local) node[lab, pos=0.5, sloped]{agregaty + metadane};
+\draw[arr] (chart.east) -- ++(0.6,0) |- (plots.east);
 \node[fbox] (fide)  at (0,-6.4)   {\texttt{ratings.fide.com}\\listy rankingowe (HTML)};
 \node[box]  (scr)   at (3.7,-6.4) {\texttt{scrape\_fide.py}\\requests + BeautifulSoup};
-\draw[arr] (fide) -- (scr);
-\draw[arr] (scr) -- (local) node[lab, pos=0.5]{upsert, TLS};
+\draw[arr, dashed] (fide) -- (scr);
+\draw[arr, dashed] (scr) -- (local) node[lab, pos=0.5]{upsert};
 \begin{pgfonlayer}{background}
   \node[draw, dashed, rounded corners=3pt, inner sep=7pt, fit=(fide)(scr),
-        label={[font=\sffamily\tiny, anchor=south west]north west:gałąź niezależna: scraping}] {};
+        label={[font=\sffamily\tiny, anchor=south west]north west:dodatek: web scraping}] {};
 \end{pgfonlayer}
 \end{tikzpicture}}
 \endgroup
-\caption{Przepływ danych. Pomarańczowe bloki działają w kontenerze Hadoop, zielone to bazy MongoDB. Agregaty trafiają do Atlasu, a do lokalnej bazy trafiają ranking FIDE i metadane importów.}\label{fig:flow}
+\caption{Przepływ danych. Pomarańczowe bloki działają w kontenerze Hadoop, zielone to bazy MongoDB. Linia przerywana: moduł dodatkowy.}\label{fig:flow}
 \end{figure}
 
+Podział ról: surowe dane (5,5 GB) leżą tylko w HDFS. Bazy dostają wynik przetwarzania: \nRows{} dokumentów agregatów w obu bazach, a lokalna dodatkowo metadane importów (\kod{import\_runs}: SHA-256 pliku, ścieżki HDFS, liczby dokumentów, czas) i ranking FIDE.
 
-\paragraph{Joby MapReduce.} Mapper czyta partie, wywołuje funkcję analizy i wypisuje linie „klucz, tabulator, liczby”; reducer sumuje liczniki po kluczu, a odsetki i średnie liczone są dopiero po jobie. Plik ma jeden split wejścia, żeby partia PGN nie została przecięta w połowie. Zapis do Atlasu to upsert po unikalnym indeksie \kod{(analysis, key)}, więc powtórny import nie dubluje dokumentów. Wyniki to 126 wierszy: 49 (błędy), 5 (powroty), 72 (czas namysłu).
+\section{Implementacja}
+\subsection{Pliki}
+\begin{table}[H]
+\centering
+\caption{Najważniejsze pliki projektu.}\label{tab:pliki}
+\small
+\begin{tabular}{p{0.36\textwidth}p{0.58\textwidth}}
+\toprule
+Plik & Rola \\
+\midrule
+\kod{run\_all.sh} & cały przepływ jednym poleceniem (rozdz.~\ref{sec:uruchomienie}) \\
+\kod{src/pgn.py} & parser PGN, czyszczenie nagłówków, tempo, kubełki Elo \\
+\kod{src/analyses.py} & trzy analizy jako funkcje ,,partia $\to$ rekordy'' \\
+\kod{src/streaming.py} & wejście i wyjście Hadoop Streaming, liczniki, sumowanie w reducerze \\
+\kod{mr/mapper.py}, \kod{mr/reducer.py} & mapper (nazwa analizy w argumencie) i wspólny reducer \\
+\kod{mr/run\_jobs.sh} & trzy joby \kod{hadoop-streaming} z pomiarem czasu \\
+\kod{src/download.py} & pobranie i ucięcie archiwum \kod{.zst} \\
+\kod{src/split\_pgn.py}, \kod{src/hdfs\_io.py} & podział na 8 części, wysyłka do HDFS bez powielania \\
+\kod{src/mongo\_io.py} & połączenia z bazami (TLS i plik CA, \kod{mongodb+srv}) \\
+\kod{src/load\_aggregates.py} & upsert agregatów do obu baz \\
+\kod{src/verify\_idempotent.py} & dowód braku powielania: import dwa razy i porównanie liczb \\
+\kod{src/scrape\_fide.py} & dodatek: scraper rankingu FIDE \\
+\kod{src/charts.py} & trzy wykresy \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Joby MapReduce}
+Mapper czyta standardowe wejście, w którym Hadoop podaje linie pliku z doklejonym numerem bajtu (\kod{12345\textbackslash t[Event "..."]}). Funkcja \kod{hadoop\_lines} usuwa ten numer, \kod{iter\_games} skleja linie w partie (nowa partia zaczyna się od \kod{[Event "}), a dla każdej partii wołana jest funkcja analizy. Mapper wypisuje rekordy \kod{klucz\textbackslash tliczby}, np.\ \kod{blitz|1200|trouble\textbackslash t3,1} (3 ruchy, 1 błąd). Hadoop sortuje wyjście mapperów po kluczu, więc reducer dostaje linie jednego klucza jedna po drugiej i tylko je sumuje. Odsetki i średnie liczę dopiero po jobie, bo odsetków nie można sumować. Mapper używa tylko biblioteki standardowej (w kontenerze jest Python 3.10 bez dodatkowych pakietów), a katalog \kod{src/} trafia do zadań przez opcję \kod{-files}.
+
+\begin{lstlisting}[style=pyc,caption={Rdzeń mappera i reducera, wersja uproszczona (pełny kod: src/streaming.py).}]
+def map_games(lines, job):
+    counters = Counter()
+    for game in iter_games(hadoop_lines(lines)):
+        counters["games"] += 1
+        result = job(game)
+        if result.reject:
+            counters[result.reject] += 1   # powód odrzucenia -> licznik Hadoopa
+        for key, nums in result.records:
+            emit_record(key, nums)         # print(f"{key}\t{liczby}")
+    for name, amount in counters.items():
+        emit_counter(name, amount)         # reporter:counter:chess,<nazwa>,<ile>
+
+def reduce_lines(lines):                   # linie już posortowane po kluczu
+    current, totals = None, []
+    for line in lines:
+        key, _, value = line.strip().partition("\t")
+        nums = [int(x) for x in value.split(",")]
+        if key != current:
+            if current is not None:
+                yield f"{current}\t{','.join(map(str, totals))}"
+            current, totals = key, nums
+        else:
+            totals = [a + b for a, b in zip(totals, nums)]
+    if current is not None:
+        yield f"{current}\t{','.join(map(str, totals))}"
+\end{lstlisting}
 
 \paragraph{Definicje miar.}
-\emph{Strata} ruchu to $\max(0,\ c_\text{przed}-c_\text{po})$ z perspektywy grającego. \emph{Błąd} to strata co najmniej 100 cp; ruch jest \emph{pod flagą}, gdy zegar po ruchu wynosi najwyżej 10 s. Ruchy bez pary ocen liczbowych (w tym z matem) lub bez zegara są pomijane. \emph{Powrót}: zwycięzca partii rozstrzygniętej miał kiedykolwiek ocenę $\le -200$ cp (biały) lub $\ge +200$ cp (czarny); mianownikiem są wszystkie rozstrzygnięte partie z oceną, więc to nie jest prawdopodobieństwo wygranej z gorszej pozycji. \emph{Czas namysłu} to różnica własnych zegarów powiększona o inkrement, w koszykach 0--2 s, 2--10 s, 10+ s.
+\emph{Strata} ruchu to $\max(0,\ c_\text{przed}-c_\text{po})$ w centypionach, z perspektywy gracza, który wykonał ruch (dla czarnych odwracam znak oceny). \emph{Błąd} to strata co najmniej 100 cp; ruch jest \emph{pod flagą}, gdy zegar po ruchu wynosi najwyżej 10 s. \emph{Powrót}: zwycięzca partii rozstrzygniętej miał kiedykolwiek ocenę gorszą o co najmniej 200 cp. Po recenzji dodałem wariant ostrzejszy, \emph{powrót utrzymany}: taka ocena trwała przez co najmniej 6 kolejnych ocen (3 pełne ruchy), bo pojedyncza zła ocena bywa chwilowym wahaniem, np.\ w środku wymiany figur. Mianownikiem obu wariantów są wszystkie rozstrzygnięte partie z oceną, więc to udział partii, a nie prawdopodobieństwo wygrania z gorszej pozycji. \emph{Czas namysłu} to poprzedni zegar gracza minus obecny plus inkrement, w koszykach 0--2 s, 2--10 s, 10+ s.
+
+\subsection{Podział wejścia i liczba mapperów}
+Hadoop dzieli plik wejściowy na splity równe blokom HDFS (128 MB) i dla każdego uruchamia mapper. Dba przy tym tylko o to, żeby nie przeciąć linii, a partia PGN zajmuje kilkanaście linii. Granica splitu przecinałaby partie: pierwszy mapper liczyłby partię bez końcówki, a drugi pominąłby jej ogon.
+
+W pierwszej wersji projektu ustawiłem \kod{split.minsize} na 2 TB, więc cały plik był jednym splitem: wynik poprawny, ale tylko jeden mapper i brak równoległości (recenzja słusznie to wytknęła). Teraz \kod{src/split\_pgn.py} dzieli plik na 8 części po ok.\ 690 MB, zawsze tuż przed linią \kod{[Event "}, i wysyła je do jednego katalogu w HDFS. \kod{split.minsize} dalej jest ogromne, więc Hadoop nie tnie części: każda część to jeden split i jeden mapper. YARN dostał 10 GB pamięci i 10 rdzeni (\kod{docker/hadoop.env}), co mieści 8 mapperów po 1 GB naraz. Tabela~\ref{tab:czasy} porównuje oba warianty na tych samych 5,5 GB.
+
+\begin{table}[H]
+\centering
+\caption{Czas jobów na pełnych danych (5,5 GB) z pliku \kod{czasy.tsv} zapisywanego przez \kod{run\_jobs.sh}. Jeden komputer, w tle działały inne programy (m.in.\ trening sieci na GPU), więc czasy są orientacyjne.}\label{tab:czasy}
+\tabCzasy
+\end{table}
+
+Przyspieszenie jest mniejsze niż 8, bo reducer i start jobu (ok.\ 20--30 s) się nie zrównoleglają, a 8 mapperów dzieli jeden dysk i rdzenie z innymi procesami.
+
+\subsection{Bazy danych i ponowny import}
+\kod{load\_aggregates.py} zamienia wiersze TSV na dokumenty (\kod{analysis}, \kod{key}, nazwane liczby, \kod{source\_month}, \kod{updated\_at}) i zapisuje je do obu baz. Każda kolekcja \kod{aggregates} ma unikalny indeks na \kod{(analysis, key)}, a zapis to \kod{update\_one(filtr, \{"\$set": dokument\}, upsert=True)}: istniejący dokument jest nadpisywany, brakujący wstawiany. Ponowne uruchomienie nie może więc powielić danych. To samo dotyczy \kod{import\_runs} (klucz \kod{pipeline}) i \kod{fide\_top} (klucz \kod{(list, period, rank)}). W HDFS pliki są wysyłane z nadpisaniem, a wysyłka jest pomijana, gdy w HDFS leżą już części o tych samych rozmiarach (dla pojedynczego pliku także z tym samym SHA-256). Dowód z pełnego przebiegu jest w rozdz.~\ref{sec:uruchomienie}.
+
+\subsection{Szyfrowanie i uwierzytelnienie}
+Lokalna baza działa z \kod{-{}-auth} (logowanie SCRAM-SHA-256) i \kod{-{}-tlsMode requireTLS}. Certyfikat serwera jest podpisany własnym CA wygenerowanym przez \kod{scripts/gen\_certs.sh} (openssl, SAN \kod{localhost} i \kod{127.0.0.1}). Klient łączy się z \kod{tls=True} i \kod{tlsCAFile=certs/ca.pem}, więc sprawdza certyfikat serwera; adres z \kod{tlsAllowInvalidCertificates} jest odrzucany w kodzie. Serwer nie wymaga certyfikatu od klienta (\kod{-{}-tlsAllowConnectionsWithoutCertificates}), co nie osłabia szyfrowania. Port bazy jest wystawiony tylko na \kod{127.0.0.1}. Atlas używa adresu \kod{mongodb+srv://} z TLS włączonym domyślnie i listy dozwolonych adresów IP. Hasła są tylko w pliku \kod{.env} poza repozytorium.
+
+\begin{table}[H]
+\centering
+\caption{Próby połączenia z lokalną bazą (\kod{docs/DOWODY.md}).}\label{tab:tls}
+\small
+\begin{tabular}{ll}
+\toprule
+Próba & Wynik \\
+\midrule
+bez TLS & połączenie zerwane przez serwer \\
+TLS bez naszego CA & \kod{certificate verify failed} (certyfikat spoza zaufanych CA) \\
+TLS + CA, bez hasła & połączenie jest, odczyt odrzucony: \kod{requires authentication} \\
+TLS + CA + SCRAM & działa \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Testy}
+Testy pytest (\kod{tests/}) sprawdzają parser na ręcznie przygotowanych partiach (zegar, oceny, mat, brak rankingu), wzory trzech analiz, mapper i reducer uruchamiane jako osobne procesy, podział pliku na części, kształt dokumentów i wykresy. Poprawność samego Hadoopa sprawdza \kod{src/compare\_sums.py}: te same analizy policzone zwykłym Pythonem na próbce 50 MB dają identyczne sumy jak joby Hadoop (krok 6a w \kod{run\_all.sh -{}-probka}).
+
+\section{Uruchomienie i możliwości}\label{sec:uruchomienie}
+Przygotowanie (raz): \kod{cp .env.example .env} i uzupełnienie haseł oraz adresu Atlasa, \kod{scripts/gen\_certs.sh}, \kod{docker compose up -d}. Potem cały projekt uruchamia jedno polecenie:
+\begin{lstlisting}[style=shc]
+./run_all.sh              # pełne dane 5,5 GB
+./run_all.sh --probka     # próbka 50 MB, ok. 2 min, z kontrolą sum
+./run_all.sh --od-zera    # najpierw czyści wyniki w HDFS i kolekcje aggregates
+\end{lstlisting}
+Skrypt wykonuje kolejno: testy, sprawdzenie połączenia TLS, pobranie danych (pomijane, gdy plik jest), podział i wysyłkę do HDFS, trzy joby, skopiowanie wyników do \kod{wyniki/}, import do obu baz dwa razy z porównaniem liczby dokumentów, scraping FIDE, wykresy i podsumowanie stanu baz. Log pełnego przebiegu jest w repozytorium (\kod{wyniki/logi/run\_all\_full.log}), a fragmenty z poleceniami i wynikami dla każdego wymagania w \kod{docs/DOWODY.md}. Fragment logu z kroku importu:
+\lstinputlisting[style=plain]{import_log.txt}
+
+Możliwości: ten sam skrypt działa na dowolnym wycinku miesiąca (próg w \kod{.env}), liczbę części ustawia się opcją \kod{-{}-parts}, a nową analizę dodaje się jedną funkcją w \kod{src/analyses.py} i wpisem w \kod{JOBS}. Wyniki można przeglądać w MongoDB Compass albo w panelu Atlasa, a przebieg jobów w panelu YARN (\kod{localhost:8088}).
 
 \section{Wyniki}
-Komórki z mniej niż 1000 ruchów oznaczono gwiazdką (tabele) lub kreskowaniem (rysunki) i nie wyciągamy z nich wniosków.
+Komórki, w których któraś grupa ma mniej niż 1000 ruchów, oznaczyłem gwiazdką (tabele) lub kreskowaniem i pustymi kółkami (rysunki) i nie wyciągam z nich wniosków.
 
-\subsection{Błędy pod flagą}
+\subsection{Błędy pod presją czasu}
 \begin{table}[H]
 \centering
 \caption{Odsetek błędów (strata $\ge100$ cp) z czasem i pod flagą (zegar $\le10$ s); wzrost to zmiana względna. Gwiazdka: któraś grupa ma poniżej 1000 ruchów.}\label{tab:blunder}
@@ -139,33 +274,29 @@ Komórki z mniej niż 1000 ruchów oznaczono gwiazdką (tabele) lub kreskowaniem
 \tabBlunder
 \end{table}
 
-Przykład: w blitzu przy Elo 1200--1599 błędów jest 18,7\% z czasem i 29,4\% pod flagą (+57\%); w bulleciu 19,7\% wobec 29,7\% (+51\%). Rysunek~\ref{fig:blunder} pokazuje te same dane graficznie.
-
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.9\textwidth]{figures/blunder.pdf}
-\caption{Odsetek błędów pod flagą i z czasem według tempa i Elo. Kreskowane słupki: poniżej 1000 ruchów.}\label{fig:blunder}
+\includegraphics[width=0.95\textwidth]{figures/blunder.pdf}
+\caption{Odsetek błędów pod flagą i z czasem według tempa i rankingu.}\label{fig:blunder}
 \end{figure}
 
 \subsection{Powroty}
 \begin{table}[H]
 \centering
-\caption{Udział rozstrzygniętych partii z oceną, w których zwycięzca był kiedyś gorszy o co najmniej dwa piony.}\label{tab:comeback}
+\caption{Udział rozstrzygniętych partii z oceną, w których zwycięzca był gorszy o co najmniej dwa piony: choć raz albo przez 6 kolejnych ocen. Gwiazdka: mniej niż 5000 partii.}\label{tab:comeback}
 \tabComeback
 \end{table}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.65\textwidth]{figures/comeback.pdf}
-\caption{Udział partii z powrotem według tempa. Kreskowany słupek (ultrabullet) ma bardzo małą próbę.}\label{fig:comeback}
+\includegraphics[width=0.75\textwidth]{figures/comeback.pdf}
+\caption{Udział partii z powrotem według tempa, oba warianty definicji.}\label{fig:comeback}
 \end{figure}
 
 \subsection{Czas namysłu}
-Tabela~\ref{tab:think} podaje średnią stratę w koszykach czasu dla blitza i bulleta (wycinek wyników), a rys.~\ref{fig:think} wszystkie tempa.
-
 \begin{table}[H]
 \centering
-\caption{Średnia strata centypionów na ruch w koszykach czasu namysłu, blitz i bullet.}\label{tab:think}
+\caption{Średnia strata centypionów na ruch w koszykach czasu namysłu, blitz i bullet (pozostałe tempa na rys.~\ref{fig:think}).}\label{tab:think}
 \small
 \tabThink
 \end{table}
@@ -173,16 +304,17 @@ Tabela~\ref{tab:think} podaje średnią stratę w koszykach czasu dla blitza i b
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{figures/namysl.pdf}
-\caption{Średnia strata centypionów w zależności od czasu namysłu, osobno dla tempa i Elo. Puste kółka: poniżej 1000 ruchów.}\label{fig:think}
+\caption{Średnia strata centypionów w zależności od czasu namysłu, osobno dla tempa i rankingu.}\label{fig:think}
 \end{figure}
-
 
 \section{Wnioski}
 \begin{itemize}
-\item Pod flagą ruchy są częściej błędami niż z czasem we wszystkich komórkach o dużej próbie. W blitzu względny wzrost rośnie z Elo, od +45\% ($<1200$) do +121\% (2400+), ale to w części efekt niskiej podstawy najsilniejszych graczy (10,1\% z czasem w blitzu 2400+).
-\item Udział partii z powrotem maleje od bulleta (55,7\%) przez blitz (47,2\%) i rapid (45,9\%) do klasycznych (40,4\%). Wynik ultrabulleta (77,2\%) opiera się na próbie 1850 partii.
-\item W blitzu i bulleciu średnia strata rośnie z czasem namysłu we wszystkich kubełkach Elo, co raczej odzwierciedla trudność pozycji (dłużej myśli się w trudnych) niż szkodliwość myślenia. W rapidzie i partiach klasycznych wzór jest nieregularny.
-\item Wyniki są opisowe i dotyczą początkowego wycinka miesiąca z partii z oceną silnika; nie wskazują przyczyn.
+\item Pod flagą ruchy są częściej błędami niż z czasem we wszystkich komórkach z dużą próbą. Względny wzrost rośnie z rankingiem (w blitzu od \BlitzLow{} do \BlitzHigh), ale to po części efekt niskiej podstawy najsilniejszych graczy.
+\item Udział partii z powrotem rośnie wraz ze skracaniem tempa, w obu wariantach definicji. Wariant ostrzejszy daje wyraźnie niższe wartości, więc część ,,powrotów'' z pierwszej definicji to chwilowe wahania oceny. Wynik ultrabulleta opiera się na małej próbie.
+\item W blitzu i bullecie średnia strata rośnie z czasem namysłu we wszystkich kubełkach rankingu. To raczej skutek trudności pozycji (dłużej myśli się w trudnych) niż szkodliwości myślenia. W rapidzie i partiach klasycznych wzór jest nieregularny.
+\item Technicznie: podział wejścia na 8 części po granicach partii skrócił przetwarzanie z \tOne{} do \tEight{} (\speedup$\times$) bez zmiany wyników.
 \end{itemize}
+
+\paragraph{Ograniczenia.} Dane to początek jednego miesiąca i tylko partie z oceną silnika (ok.\ 10\%), czyli nielosowa część zbioru. Wyniki są opisowe i korelacyjne, bez testów istotności i przedziałów ufności. Klaster ma jeden węzeł, więc HDFS nie ma replikacji, a równoległość ogranicza się do rdzeni jednego komputera.
 
 \end{document}

@@ -1,0 +1,5 @@
+usunięto kolekcje aggregates w obu bazach
+aggregates przed importem:  {'lokalna': 0, 'atlas': 0}
+aggregates po 1. imporcie:  {'lokalna': 126, 'atlas': 126}
+aggregates po 2. imporcie:  {'lokalna': 126, 'atlas': 126}
+OK: drugi import nie zwiększył liczby dokumentów
