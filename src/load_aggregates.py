@@ -1,6 +1,8 @@
-"""Agregaty trzech jobów tylko do Atlasu. Metadane importu zostają lokalnie.
+"""Wgrywa wyniki trzech jobów (pliki TSV z HDFS) do lokalnej bazy i do Atlasu.
 
-Puste ``ATLAS_URI`` kończy program błędem i nic nie zapisuje w innej bazie.
+Do obu baz trafiają te same dokumenty, zapisywane upsertem po unikalnym
+``(analysis, key)``. Drugie uruchomienie tylko nadpisuje istniejące dokumenty,
+nie dopisuje nowych. Puste ``ATLAS_URI`` kończy program błędem.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from src.aggregate import read_tsv
 from src.mongo_io import DB_NAME, atlas_client, local_client, record_import, require_atlas_uri
 
 SOURCE_MONTH = "2026-09"
+HDFS_INPUT = "/user/chess/raw/lichess_2026-09"
 FIELDS = {
     "blunder_in_trouble": ("n_moves", "n_blunders"),
     "comeback_by_tc": ("n", "comeback", "comeback_held"),
@@ -22,6 +25,7 @@ FIELDS = {
 
 
 def documents(analysis: str, rows) -> list[dict]:
+    """Wiersze ``klucz -> liczby`` z TSV zamienia na dokumenty z nazwanymi polami."""
     names = FIELDS[analysis]
     now = datetime.now(timezone.utc)
     docs = []
@@ -39,20 +43,58 @@ def documents(analysis: str, rows) -> list[dict]:
     return docs
 
 
-def upsert_atlas(docs: list[dict]) -> int:
-    client = atlas_client()
+def upsert(client, docs: list[dict]) -> int:
+    """Upsert dokumentów do kolekcji ``aggregates``. Zwraca liczbę dokumentów po zapisie."""
+    col = client[DB_NAME]["aggregates"]
+    col.create_index([("analysis", 1), ("key", 1)], unique=True, name="analysis_key")
+    for doc in docs:
+        col.update_one(
+            {"analysis": doc["analysis"], "key": doc["key"]},
+            {"$set": doc},
+            upsert=True,
+        )
+    return col.count_documents({"source_month": SOURCE_MONTH})
+
+
+def read_docs(blunder: Path, comeback: Path, think: Path) -> list[dict]:
+    grouped = {
+        "blunder_in_trouble": read_tsv(blunder),
+        "comeback_by_tc": read_tsv(comeback),
+        "think_vs_cpl": read_tsv(think),
+    }
+    return [doc for name, rows in grouped.items() for doc in documents(name, rows)]
+
+
+def load(docs: list[dict], hdfs_path: str) -> dict[str, int]:
+    """Zapis do obu baz. Zwraca ``{"lokalna": count, "atlas": count}``."""
+    counts = {}
+    for name, connect in (("lokalna", local_client), ("atlas", atlas_client)):
+        client = connect()
+        try:
+            counts[name] = upsert(client, docs)
+        finally:
+            client.close()
+
+    local = local_client()
     try:
-        col = client[DB_NAME]["aggregates"]
-        col.create_index([("analysis", 1), ("key", 1)], unique=True, name="analysis_key")
-        for doc in docs:
-            col.update_one(
-                {"analysis": doc["analysis"], "key": doc["key"]},
-                {"$set": doc},
-                upsert=True,
-            )
-        return col.count_documents({"source_month": SOURCE_MONTH})
+        record_import(
+            local,
+            "aggregates",
+            source_month=SOURCE_MONTH,
+            hdfs_path=hdfs_path,
+            rows=len(docs),
+            documents_local=counts["lokalna"],
+            documents_atlas=counts["atlas"],
+        )
     finally:
-        client.close()
+        local.close()
+    return counts
+
+
+def add_tsv_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--blunder", type=Path, required=True)
+    parser.add_argument("--comeback", type=Path, required=True)
+    parser.add_argument("--think", type=Path, required=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,38 +104,18 @@ def main(argv: list[str] | None = None) -> int:
         print(exc.code, file=sys.stderr)
         return 1
 
-    parser = argparse.ArgumentParser(description="Wgrywa agregaty jobów do Atlasu.")
-    parser.add_argument("--blunder", type=Path, required=True)
-    parser.add_argument("--comeback", type=Path, required=True)
-    parser.add_argument("--think", type=Path, required=True)
-    parser.add_argument("--hdfs-path", default="/user/chess/raw/lichess_2026-09.pgn")
+    parser = argparse.ArgumentParser(description="Wgrywa agregaty jobów do lokalnej bazy i do Atlasu.")
+    add_tsv_arguments(parser)
+    parser.add_argument("--hdfs-path", default=HDFS_INPUT)
     args = parser.parse_args(argv)
 
-    grouped = {
-        "blunder_in_trouble": read_tsv(args.blunder),
-        "comeback_by_tc": read_tsv(args.comeback),
-        "think_vs_cpl": read_tsv(args.think),
-    }
-    docs = [doc for name, rows in grouped.items() for doc in documents(name, rows)]
+    docs = read_docs(args.blunder, args.comeback, args.think)
     try:
-        count = upsert_atlas(docs)
+        counts = load(docs, args.hdfs_path)
     except Exception as exc:
-        print(f"BŁĄD: zapis agregatów do Atlasu nie powiódł się ({type(exc).__name__})", file=sys.stderr)
+        print(f"BŁĄD: zapis agregatów nie powiódł się ({type(exc).__name__})", file=sys.stderr)
         return 1
-
-    local = local_client()
-    try:
-        record_import(
-            local,
-            "aggregates",
-            source_month=SOURCE_MONTH,
-            hdfs_path=args.hdfs_path,
-            documents=count,
-            rows=len(docs),
-        )
-    finally:
-        local.close()
-    print(f"aggregates count={count} (source_month={SOURCE_MONTH})")
+    print(f"aggregates: wierszy TSV {len(docs)}, lokalna {counts['lokalna']}, atlas {counts['atlas']}")
     return 0
 
 

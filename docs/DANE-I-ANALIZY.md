@@ -155,7 +155,7 @@ Reducer rozdziela po przecinku, sumuje pola jako `int` i wypisuje ten sam układ
 
 ## MongoDB
 
-Kolekcja `aggregates` w Atlasie. Unikalny indeks `(analysis, key)`. Upsert. Pola: `analysis` (`blunder_in_trouble`, `comeback_by_tc` albo `think_vs_cpl`), `key`, liczniki jobu, `source_month` = `2026-09`, `updated_at`. Agregaty nie trafiają do lokalnego Mongo. Puste `ATLAS_URI` kończy loader błędem, który nazywa brakujące `ATLAS_URI`, i nic nie zapisuje w innym miejscu.
+Kolekcja `aggregates` w obu bazach (lokalnej i Atlas), te same dokumenty. Unikalny indeks `(analysis, key)`. Upsert. Pola: `analysis` (`blunder_in_trouble`, `comeback_by_tc` albo `think_vs_cpl`), `key`, liczniki jobu, `source_month` = `2026-09`, `updated_at`. Puste `ATLAS_URI` kończy loader błędem, który nazywa brakujące `ATLAS_URI`, zanim cokolwiek zostanie zapisane.
 
 Kolekcja `fide_top` lokalnie. Unikalny indeks `(list, period, rank)`. Drugi zapis tego samego wiersza nie zwiększa `count`.
 
