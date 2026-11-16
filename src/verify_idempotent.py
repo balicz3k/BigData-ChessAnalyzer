@@ -13,24 +13,34 @@ from src.load_aggregates import HDFS_INPUT, add_tsv_arguments, load, read_docs
 from src.mongo_io import DB_NAME, atlas_client, local_client
 
 
-def count_aggregates() -> dict[str, int]:
+def count_aggregates(collection: str) -> dict[str, int]:
     counts = {}
     for name, connect in (("lokalna", local_client), ("atlas", atlas_client)):
         client = connect()
         try:
-            counts[name] = client[DB_NAME]["aggregates"].count_documents({})
+            counts[name] = client[DB_NAME][collection].count_documents({})
         finally:
             client.close()
     return counts
 
 
-def verify_aggregates(docs: list[dict]) -> bool:
-    before = count_aggregates()
-    first = load(docs, HDFS_INPUT)
-    second = load(docs, HDFS_INPUT)
-    print(f"aggregates przed importem:  {before}")
-    print(f"aggregates po 1. imporcie:  {first}")
-    print(f"aggregates po 2. imporcie:  {second}")
+def drop_aggregates(collection: str) -> None:
+    """Usuwa kolekcję agregatów w obu bazach (przebieg "od zera")."""
+    for connect in (local_client, atlas_client):
+        client = connect()
+        try:
+            client[DB_NAME][collection].drop()
+        finally:
+            client.close()
+
+
+def verify_aggregates(docs: list[dict], collection: str) -> bool:
+    before = count_aggregates(collection)
+    first = load(docs, HDFS_INPUT, collection)
+    second = load(docs, HDFS_INPUT, collection)
+    print(f"{collection} przed importem:  {before}")
+    print(f"{collection} po 1. imporcie:  {first}")
+    print(f"{collection} po 2. imporcie:  {second}")
     expected = {"lokalna": len(docs), "atlas": len(docs)}
     if first != expected or second != expected:
         print(f"BŁĄD: oczekiwano {expected} dokumentów w każdej bazie", file=sys.stderr)
@@ -54,9 +64,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Dwa importy pod rząd nie mogą zwiększyć liczby dokumentów.")
     add_tsv_arguments(parser)
     parser.add_argument("--fide", action="store_true", help="sprawdź też scraper FIDE (dodatek)")
+    parser.add_argument("--od-zera", action="store_true", help="najpierw usuń kolekcję agregatów w obu bazach")
     args = parser.parse_args(argv)
 
-    ok = verify_aggregates(read_docs(args.blunder, args.comeback, args.think))
+    if args.od_zera:
+        drop_aggregates(args.kolekcja)
+        print(f"usunięto kolekcje {args.kolekcja} w obu bazach")
+    ok = verify_aggregates(read_docs(args.blunder, args.comeback, args.think), args.kolekcja)
     if args.fide:
         ok = verify_fide() and ok
     if ok:

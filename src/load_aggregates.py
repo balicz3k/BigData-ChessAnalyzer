@@ -16,6 +16,7 @@ from src.aggregate import read_tsv
 from src.mongo_io import DB_NAME, atlas_client, local_client, record_import, require_atlas_uri
 
 SOURCE_MONTH = "2026-09"
+COLLECTION = "aggregates"  # próbka z run_all.sh --probka idzie do "aggregates_probka"
 HDFS_INPUT = "/user/chess/raw/lichess_2026-09"
 FIELDS = {
     "blunder_in_trouble": ("n_moves", "n_blunders"),
@@ -43,9 +44,9 @@ def documents(analysis: str, rows) -> list[dict]:
     return docs
 
 
-def upsert(client, docs: list[dict]) -> int:
-    """Upsert dokumentów do kolekcji ``aggregates``. Zwraca liczbę dokumentów po zapisie."""
-    col = client[DB_NAME]["aggregates"]
+def upsert(client, docs: list[dict], collection: str = COLLECTION) -> int:
+    """Upsert dokumentów do kolekcji agregatów. Zwraca liczbę dokumentów po zapisie."""
+    col = client[DB_NAME][collection]
     col.create_index([("analysis", 1), ("key", 1)], unique=True, name="analysis_key")
     for doc in docs:
         col.update_one(
@@ -65,13 +66,13 @@ def read_docs(blunder: Path, comeback: Path, think: Path) -> list[dict]:
     return [doc for name, rows in grouped.items() for doc in documents(name, rows)]
 
 
-def load(docs: list[dict], hdfs_path: str) -> dict[str, int]:
+def load(docs: list[dict], hdfs_path: str, collection: str = COLLECTION) -> dict[str, int]:
     """Zapis do obu baz. Zwraca ``{"lokalna": count, "atlas": count}``."""
     counts = {}
     for name, connect in (("lokalna", local_client), ("atlas", atlas_client)):
         client = connect()
         try:
-            counts[name] = upsert(client, docs)
+            counts[name] = upsert(client, docs, collection)
         finally:
             client.close()
 
@@ -79,7 +80,7 @@ def load(docs: list[dict], hdfs_path: str) -> dict[str, int]:
     try:
         record_import(
             local,
-            "aggregates",
+            collection,
             source_month=SOURCE_MONTH,
             hdfs_path=hdfs_path,
             rows=len(docs),
@@ -95,6 +96,7 @@ def add_tsv_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--blunder", type=Path, required=True)
     parser.add_argument("--comeback", type=Path, required=True)
     parser.add_argument("--think", type=Path, required=True)
+    parser.add_argument("--kolekcja", default=COLLECTION, help="nazwa kolekcji (domyślnie aggregates)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -111,11 +113,11 @@ def main(argv: list[str] | None = None) -> int:
 
     docs = read_docs(args.blunder, args.comeback, args.think)
     try:
-        counts = load(docs, args.hdfs_path)
+        counts = load(docs, args.hdfs_path, args.kolekcja)
     except Exception as exc:
         print(f"BŁĄD: zapis agregatów nie powiódł się ({type(exc).__name__})", file=sys.stderr)
         return 1
-    print(f"aggregates: wierszy TSV {len(docs)}, lokalna {counts['lokalna']}, atlas {counts['atlas']}")
+    print(f"{args.kolekcja}: wierszy TSV {len(docs)}, lokalna {counts['lokalna']}, atlas {counts['atlas']}")
     return 0
 
 
