@@ -20,14 +20,12 @@ trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/src"
 cp "$ROOT"/src/*.py "$STAGE/src/"
-cp "$ROOT/mr/reducer.py" "$STAGE/reducer.py"
+cp "$ROOT/mr/mapper.py" "$ROOT/mr/reducer.py" "$STAGE/"
 
 hdfs dfs -test -e "$INPUT"
 
 run_one() {
   local analysis=$1
-  local mapper_name=$2
-  cp "$ROOT/mr/$mapper_name" "$STAGE/mapper.py"
   hdfs dfs -rm -r -f "$OUTPUT/$analysis" >/dev/null 2>&1 || true
   echo "Start jobu $analysis"
   hadoop jar "$JAR" \
@@ -41,14 +39,15 @@ run_one() {
     -D mapreduce.map.java.opts=-Xmx768m \
     -D yarn.app.mapreduce.am.resource.mb=768 \
     -files "$STAGE/src,$STAGE/mapper.py,$STAGE/reducer.py" \
-    -mapper "python3 -u mapper.py" \
-    -reducer "python3 -u reducer.py" \
+    -cmdenv PYTHONPATH=. \
+    -mapper "python3 mapper.py $analysis" \
+    -reducer "python3 reducer.py" \
     -input "$INPUT" \
     -output "$OUTPUT/$analysis"
   echo "Koniec jobu $analysis -> $OUTPUT/$analysis"
 }
 
-run_one blunder_in_trouble mapper_blunder.py
-run_one comeback_by_tc mapper_comeback.py
-run_one think_vs_cpl mapper_think.py
+run_one blunder_in_trouble
+run_one comeback_by_tc
+run_one think_vs_cpl
 echo "Trzy joby skończone: $OUTPUT"

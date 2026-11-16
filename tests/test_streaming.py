@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,8 @@ from src.compare_sums import compare_job
 from src.streaming import hadoop_lines, map_games, reduce_lines
 
 ROOT = Path(__file__).resolve().parent.parent
+# tak jak w run_jobs.sh: katalog z src/ jest na PYTHONPATH
+ENV = {**os.environ, "PYTHONPATH": "."}
 
 PGN = """[Event "x"]
 [Result "1-0"]
@@ -49,6 +52,7 @@ def test_skrypt_reducera(tmp_path):
         text=True,
         capture_output=True,
         cwd=ROOT,
+        env=ENV,
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
@@ -57,11 +61,12 @@ def test_skrypt_reducera(tmp_path):
 
 def test_skrypt_mappera_comeback():
     proc = subprocess.run(
-        [sys.executable, "mr/mapper_comeback.py"],
+        [sys.executable, "mr/mapper.py", "comeback_by_tc"],
         input="".join(f"{i}\t{line}" for i, line in enumerate(PGN.splitlines(keepends=True))),
         text=True,
         capture_output=True,
         cwd=ROOT,
+        env=ENV,
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
@@ -83,10 +88,21 @@ def test_sumy_zgodne_z_parserem(tmp_path):
     assert "bullet" in diffs[0]
 
 
+def test_mapper_bez_nazwy_analizy_konczy_sie_bledem():
+    proc = subprocess.run(
+        [sys.executable, "mr/mapper.py", "nie_ma_takiej"],
+        input="",
+        text=True,
+        capture_output=True,
+        cwd=ROOT,
+        env=ENV,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "użycie" in proc.stderr
+
+
 def test_mapper_nie_kopiuje_wzoru():
-    for name in ("mapper_blunder.py", "mapper_comeback.py", "mapper_think.py"):
-        text = (ROOT / "mr" / name).read_text(encoding="utf-8")
-        assert "centipawn_loss" not in text
-        assert "def blunder_job" not in text
-        assert "def comeback_job" not in text
-        assert "def think_job" not in text
+    text = (ROOT / "mr" / "mapper.py").read_text(encoding="utf-8")
+    assert "centipawn_loss" not in text
+    assert "def blunder_job" not in text
