@@ -18,7 +18,7 @@ Wymagania z `Zasady_zaliczenia_projekt1.pdf`; wyższy próg obejmuje niższe. Nu
 | 4.0 | Dwie bazy: lokalna + darmowa chmura MongoDB | MongoDB 7 w Dockerze + Atlas M0, w obu `aggregates` | 6 |
 | 4.0 | Ponowny import bez niekontrolowanego powielania | upsert po unikalnym `(analysis, key)`; 0 → 126 → 126 | 6 |
 | 4.0 | Dane do min. jednej bazy z web scrapingu | dodatek: ranking FIDE → lokalne `fide_top` | 7 |
-| 4.0 | Prezentacja, przepływ danych i wyniki | `prezentacja/prezentacja.pdf`, `docs/SCENARIUSZ_POKAZU.md` | 10 |
+| 4.0 | Prezentacja, przepływ danych i wyniki | `prezentacja/prezentacja.pdf` | 10 |
 | 5.0 | Główny zbiór w HDFS | `/user/chess/raw/lichess_2026-09/` (8 części, 5,1 GiB) | 2 |
 | 5.0 | Hadoop MapReduce / Streaming do analizy | 3 joby Streaming, 8 mapperów + 1 reducer | 3, 4 |
 | 5.0 | Wyniki / agregaty / metadane w MongoDB | `aggregates` (obie bazy), `import_runs` (lokalnie) | 6 |
@@ -199,7 +199,7 @@ Krok 9: `python -m src.charts --out plots ...` → `plots/blunder.png`, `plots/c
 ## 10. Materiały do oddania i prezentacja (3.0, 4.0, 5.0)
 
 - `do_oddania/`: zip z kodem (z `git archive`; skrypt `scripts/paczka_do_oddania.sh` sprawdza, że nie ma w nim `.env`, kluczy, certyfikatów ani danych PGN poza małymi fixturami testów), sprawozdanie PDF, prezentacja PDF, `INSTRUKCJA_DANYCH.md`.
-- Prezentacja: `prezentacja/prezentacja.pdf` (12 slajdów), przebieg pokazu: `docs/SCENARIUSZ_POKAZU.md`.
+- Prezentacja: `prezentacja/prezentacja.pdf` (12 slajdów).
 
 ## 11. Sekrety w repozytorium
 

@@ -13,7 +13,7 @@ Trzy analizy (definicje w `docs/DANE-I-ANALIZY.md`):
 | `comeback_by_tc` | Jak często wygrywa gracz, który był gorszy o co najmniej 2 piony (dwa warianty definicji)? |
 | `think_vs_cpl` | Czy dłuższy namysł daje mniejszą stratę centypionów? |
 
-Opis działania „po ludzku” i pytania na obronę: `docs/ARCHITEKTURA_DLA_MNIE.md`. Dowody spełnienia wymagań (polecenie + wynik): `docs/DOWODY.md`.
+Dowody spełnienia wymagań (polecenie + wynik): `docs/DOWODY.md`.
 
 ## Uruchomienie jednym poleceniem
 
